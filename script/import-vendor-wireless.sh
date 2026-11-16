@@ -57,3 +57,22 @@ echo
 echo "完成。已导入到 $DST"
 echo "这些文件在 .gitignore 里，不会被提交。"
 echo "重新编译前建议确认 Kconfig/Makefile 里的引用路径与实际目录一致。"
+
+# 厂商 btif 代码还需要两处 Kconfig/Makefile 挂钩，仓库里刻意没有它们
+# （无条件 source 会让干净的 6.12.115 在 Kconfig 阶段就失败）。
+# 导入完成后在这里补回去。
+STAGING_KCONFIG="$KERNEL/drivers/staging/Kconfig"
+if [ -d "$KERNEL/drivers/staging/btif" ] && ! grep -q 'staging/btif/Kconfig' "$STAGING_KCONFIG"; then
+    echo 'source "drivers/staging/btif/Kconfig"' >> "$STAGING_KCONFIG"
+    echo "已在 drivers/staging/Kconfig 末尾补回 source 行"
+fi
+
+STAGING_MAKEFILE="$KERNEL/drivers/staging/Makefile"
+if [ -d "$KERNEL/drivers/staging/btif" ] && ! grep -q 'btif/' "$STAGING_MAKEFILE"; then
+    echo 'obj-$(CONFIG_MTK_BTIF_DRV)	+= btif/' >> "$STAGING_MAKEFILE"
+    echo "已在 drivers/staging/Makefile 末尾补回 obj- 行"
+fi
+
+echo
+echo "注意：补回的两行只存在于本地工作树，不要提交它们，"
+echo "     否则干净的 6.12.115 又会在 Kconfig 阶段失败。"
