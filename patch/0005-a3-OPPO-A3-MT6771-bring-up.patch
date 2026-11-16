@@ -1,4 +1,4 @@
-From 4a0911a4271b0f1e5fe2cb33bc3d83f271cd67f4 Mon Sep 17 00:00:00 2001
+From 04eb06163c1c2bc189d724202938d3360b1f0e3e Mon Sep 17 00:00:00 2001
 From: a3-port <a3@localhost>
 Date: Mon, 16 Nov 2026 22:42:39 +0800
 Subject: [PATCH 5/5] a3: OPPO A3 MT6771 bring-up
@@ -59,7 +59,7 @@ WiFi CONSYS 供电、WMAC 胶水层（厂商 btif 代码由脚本导入，不入
  drivers/power/supply/bq24190_charger.c        |   44 +-
  drivers/power/supply/bq25890_charger.c        |   34 +-
  drivers/soc/mediatek/mtk-mmsys.c              |   15 +
- drivers/staging/Kconfig                       |    2 +
+ drivers/staging/Kconfig                       |    1 +
  drivers/staging/Makefile                      |    1 +
  drivers/usb/gadget/function/f_rndis.c         |    2 +-
  drivers/usb/mtu3/mtu3.h                       |    1 +
@@ -68,7 +68,7 @@ WiFi CONSYS 供电、WMAC 胶水层（厂商 btif 代码由脚本导入，不入
  drivers/usb/mtu3/mtu3_host.c                  |   18 +-
  drivers/usb/mtu3/mtu3_plat.c                  |   49 +-
  init/main.c                                   |    4 +
- 55 files changed, 9838 insertions(+), 334 deletions(-)
+ 55 files changed, 9837 insertions(+), 334 deletions(-)
  create mode 100644 arch/arm64/configs/a3_defconfig
  create mode 100644 arch/arm64/kernel/a3-consys-power.c
  create mode 100644 arch/arm64/kernel/a3-gpu-power.c
@@ -10751,14 +10751,13 @@ index bb4639ca0..af9187325 100644
  	{ .compatible = "mediatek,mt8188-vdosys0", .data = &mt8188_vdosys0_driver_data },
  	{ .compatible = "mediatek,mt8188-vdosys1", .data = &mt8188_vdosys1_driver_data },
 diff --git a/drivers/staging/Kconfig b/drivers/staging/Kconfig
-index 7aa37f54a..bcdc4cea4 100644
+index 7aa37f54a..a763f477e 100644
 --- a/drivers/staging/Kconfig
 +++ b/drivers/staging/Kconfig
-@@ -62,4 +62,6 @@ source "drivers/staging/fieldbus/Kconfig"
+@@ -62,4 +62,5 @@ source "drivers/staging/fieldbus/Kconfig"
  
  source "drivers/staging/vme_user/Kconfig"
  
-+source "drivers/staging/btif/Kconfig"
 +
  endif # STAGING
 diff --git a/drivers/staging/Makefile b/drivers/staging/Makefile
