@@ -1,8 +1,23 @@
-name: 验证内核补丁集
+name: 构建 A3 内核与镜像
 
-# 手动触发：验证 patch/ 里的补丁能应用到干净的 Linux 6.12.115 并编译出 Image
+# 两种触发方式：
+#   1. 手动：在 Actions 页面点 "Run workflow"，可勾选要构建哪些产物
+#   2. 自动：push 修改 patch/ 或本 workflow 时
 on:
   workflow_dispatch:
+    inputs:
+      build_boot:
+        description: '构建 boot.img（内核 + 设备树）'
+        type: boolean
+        default: true
+      build_rootfs_minimal:
+        description: '构建 rootfs-minimal.img（最小系统 + SSH）'
+        type: boolean
+        default: true
+      build_rootfs_phosh:
+        description: '构建 rootfs-phosh.img（最小系统 + phosh 桌面）'
+        type: boolean
+        default: true
   push:
     paths:
       - 'patch/**'
@@ -10,28 +25,35 @@ on:
 
 jobs:
   build:
-    name: 应用补丁并编译 Image
+    name: 应用补丁、编译内核、打包镜像
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 180
 
     steps:
       - name: 取出本仓库
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
-      - name: 显示补丁清单
+      - name: 补丁与仓库内容一览
         run: |
-          echo "本仓库补丁："
-          ls -1 patch/
-          echo
-          echo "补丁总行数："
-          wc -l patch/*.patch | tail -1
+          echo "补丁："; ls -1 patch/
+          echo; echo "厂商文件："; ls -lh vendor/ 2>/dev/null || echo "(vendor 目录为空)"
+          echo; echo "脚本："; ls -1 script/
 
-      - name: 安装交叉编译工具链
+      - name: 安装构建工具
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             gcc-aarch64-linux-gnu bc bison flex libssl-dev libelf-dev \
-            make xz-utils ca-certificates
+            make xz-utils ca-certificates \
+            debootstrap qemu-user-static binfmt-support \
+            e2fsprogs python3 zstd
+
+      - name: 显示 qemu/binfmt 状态
+        run: |
+          ls -l /usr/bin/qemu-aarch64-static 2>/dev/null || echo "缺少 qemu-aarch64-static"
+          ls /proc/sys/fs/binfmt_misc/ 2>/dev/null | head -5 || true
 
       - name: 下载干净的 Linux 6.12.115
         run: |
@@ -40,7 +62,6 @@ jobs:
             https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.12.115.tar.xz
           tar xf linux.tar.xz
           test -d linux-6.12.115
-          echo "源码树就绪"
 
       - name: 应用全部补丁
         run: |
@@ -48,7 +69,7 @@ jobs:
           cd linux-6.12.115
           n=0
           for p in ../patch/*.patch; do
-            echo "===== 应用 $p ====="
+            echo "===== $p ====="
             patch -p1 --no-backup-if-mismatch < "$p"
             n=$((n + 1))
           done
@@ -60,11 +81,52 @@ jobs:
           cd linux-6.12.115
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- a3_defconfig
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j"$(nproc)" Image
-          ls -lh arch/arm64/boot/Image
+          ls -lh arch/arm64/boot/Image System.map
 
-      - name: 上传编译产物
+      - name: 打包 boot.img
+        if: github.event_name != 'workflow_dispatch' || inputs.build_boot
+        run: |
+          set -e
+          chmod +x script/*.sh
+          export A3_ROOT="$PWD"
+          export A3_OUT="$PWD/linux-6.12.115"
+          export A3_IMG="$PWD/vendor"
+          export A3_SCRIPTS="$PWD/script"
+          mkdir -p out
+          # 触摸可用版本用 a3-v186-tgpio.dtb
+          if [ -f vendor/a3-v186-tgpio.dtb ]; then
+            export A3_DTB="$PWD/vendor/a3-v186-tgpio.dtb"
+          fi
+          script/a3-mkboot.sh boot
+          cp -v "$PWD/vendor"/*.img out/boot.img 2>/dev/null || \
+            cp -v images/*.img out/boot.img 2>/dev/null || \
+            cp -v "$PWD"/*.img out/boot.img 2>/dev/null || true
+          ls -lh out/ || true
+
+      - name: 构建 rootfs-minimal.img
+        if: github.event_name != 'workflow_dispatch' || inputs.build_rootfs_minimal
+        run: |
+          set -e
+          chmod +x script/*.sh
+          sudo mkdir -p /work && sudo chown "$USER" /work
+          sudo -E script/build-rootfs.sh minimal out/rootfs-minimal.img 1G
+
+      - name: 构建 rootfs-phosh.img
+        if: github.event_name != 'workflow_dispatch' || inputs.build_rootfs_phosh
+        run: |
+          set -e
+          chmod +x script/*.sh
+          sudo mkdir -p /work && sudo chown "$USER" /work
+          sudo -E script/build-rootfs.sh phosh out/rootfs-phosh.img 3G
+
+      - name: 上传产物
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Image-6.12.115-a3
-          path: linux-6.12.115/arch/arm64/boot/Image
-          if-no-files-found: error
+          name: a3-images
+          path: |
+            out/*.img
+            linux-6.12.115/arch/arm64/boot/Image
+            linux-6.12.115/System.map
+          if-no-files-found: warn
+          retention-days: 14

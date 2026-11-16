@@ -1,0 +1,7 @@
+
+
+# vendor 下这几个文件是打包必需，允许入库
+!vendor/stock-boot-orig.img
+!vendor/a3-empty.cpio.gz
+!vendor/*.dtb
+!vendor/*.bin

@@ -9,10 +9,10 @@
 # 每一步都来自实测踩坑，改动前先读 linux/docs/boot-packaging.md。
 set -euo pipefail
 
-A3=/opt/oppoa3
+A3=${A3_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}
 SRC=$A3/kernel-src
-OUT=$A3/qdiag
-IMG=$A3/images
+OUT=${A3_OUT:-$A3/qdiag}
+IMG=${A3_IMG:-$A3/vendor}
 STAGE=$A3/wv
 
 NAME="${1:-boot-$(date +%m%d-%H%M)}"
@@ -32,8 +32,8 @@ say "0/6 前置检查"
 [[ -f $IMG/a3-empty.cpio.gz ]]        || die "找不到 a3-empty.cpio.gz（必须用空 ramdisk，让内核按 root=PARTUUID 直接挂载 userdata）"
 [[ -f $IMG/a3-v186-good.dtb ]]        || die "找不到 a3-v186-good.dtb"
 [[ -f $IMG/stock-boot-orig.img ]]     || die "找不到 stock-boot-orig.img（要从中嫁接 AVB）"
-[[ -f $A3/a3-prep-kernel.py ]]        || die "找不到 a3-prep-kernel.py"
-[[ -f $A3/mk104.py ]]                 || die "找不到 mk104.py"
+[[ -f ${A3_SCRIPTS:-$A3/script}/a3-prep-kernel.py ]]        || die "找不到 a3-prep-kernel.py"
+[[ -f ${A3_SCRIPTS:-$A3/script}/mk104.py ]]                 || die "找不到 mk104.py"
 
 # 关键：DTB 必须是 a3-v186-good.dtb。
 # 它的 msdc@11230000 是 "mediatek,mt6771-mmc"（主线 mtk-sd 认）；
@@ -64,7 +64,7 @@ green "  前置检查通过（DTB $DTB_MD5）"
 # ------------------------------------------------- 1. 修 Image 头（不改 code0 跳板）
 say "1/6 修 arm64 Image 头（text_offset / image_size / flags / code0=b+4）"
 # 注意：绝不能用 --probe。PROBE_STUB 用 x0，会破坏 LK 传进来的 DTB 指针 → 卡 logo。
-python3 "$A3/a3-prep-kernel.py" "$OUT/arch/arm64/boot/Image" \
+python3 "${A3_SCRIPTS:-$A3/script}/a3-prep-kernel.py" "$OUT/arch/arm64/boot/Image" \
         "$IMG/stock-boot-orig.img" /tmp/a3_k1.gz | sed 's/^/  /'
 python3 - <<'PY'
 import gzip
@@ -75,7 +75,7 @@ green "  裸 Image 已解出 /tmp/a3_Image-hdr"
 # ------------------------------------------------- 2. 看门狗跳板（必需）
 say "2/6 注入 TopRGU 看门狗关闭跳板（不注入 = 60 秒周期重启）"
 # mk104.py 用 x8/x9（保留 x0=DTB），结尾 b primary_entry（地址取自 System.map）
-python3 "$A3/mk104.py" /tmp/a3_Image-hdr "$IMG/stock-boot-orig.img" \
+python3 "${A3_SCRIPTS:-$A3/script}/mk104.py" /tmp/a3_Image-hdr "$IMG/stock-boot-orig.img" \
         /tmp/a3_k2.gz "$OUT/System.map" | sed 's/^/  /'
 green "  跳板已注入"
 

@@ -79,3 +79,35 @@ firmware/                          厂商固件
 ```
 
 详细结论与踩坑记录见 `docs/`。
+
+## 构建：GitHub Actions
+
+仓库带一个工作流 `.github/workflows/verify-kernel.yml`，两种触发方式：
+
+```
+1. 手动：Actions 页面 → 「构建 A3 内核与镜像」→ Run workflow
+   勾选要构建的产物（boot.img / rootfs-minimal.img / rootfs-phosh.img）
+2. 自动：push 改动 patch/ 或工作流本身时触发
+```
+
+产物（artifact `a3-images`）：
+
+```
+boot.img              内核 + 设备树，fastboot flash boot 直接可用
+rootfs-minimal.img    Debian 13 最小系统 + SSH，1 GB，先验证内核用
+rootfs-phosh.img      最小系统 + phosh 手机桌面 + 中文字体，3 GB
+Image / System.map    裸内核与符号表
+```
+
+产物内容说明：
+
+```
+· rootfs 从零用 debootstrap 构建，不继承任何手工改动
+· 固件只放能驱动的设备：触摸（NT36672A）。WiFi/BT 还没打通，固件不放入
+· 已预置：usb0 静态地址 10.42.1.2/24、sshd、用户 kesry（默认密码见构建脚本（script/build-rootfs.sh），免密 sudo）
+· 预置 a3-growroot.service：首次启动自动把根分区扩到整个 userdata
+```
+
+`vendor/` 里放了打包必需的三个文件：原厂 `stock-boot-orig.img`（打包时要嫁接 AVB
+并读取内核头常量）、`a3-v186-good.dtb`（已验证可开机的基线设备树）、
+`a3-v186-tgpio.dtb`（触摸可用版本）、`a3-empty.cpio.gz`（空 ramdisk）。
