@@ -1,8 +1,8 @@
-From b80c13454301d378e91fb0215a1f20227f415c06 Mon Sep 17 00:00:00 2001
+From 7510c8d106063a78f19e9d66e4ad75acb523a0c9 Mon Sep 17 00:00:00 2001
 From: oppoa3-port <port@oppoa3.local>
 Date: Wed, 4 Nov 2026 00:25:54 +0800
-Subject: [PATCH 02/12] arm64: dts: mt6771: add 26 MHz clock and a disabled
- debug UART
+Subject: [PATCH 2/5] arm64: dts: mt6771: add 26 MHz clock and a disabled debug
+ UART
 
 The board has no UART test point wired up, so the node stays disabled for
 now: a wrong IRQ guess must not be allowed to stall the very first boot.

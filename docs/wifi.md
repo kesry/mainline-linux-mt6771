@@ -93,7 +93,11 @@ A3 CONSYS: INFRA2_CG_STA now 0x00000000 (cqdma ungated=1)
 - 版权状态不清楚
 - 与主线风格差异极大，放在 patch 里无法 review
 
-因此 `kernel-src/.gitignore` 排除了这些目录，改为**用脚本从厂商源码树导入**：
+例外：`mtk_wcn_cmb_stub.h` 和 `wmt_build_in_adapter.h` 两个小头文件**保留在仓库里**，
+因为我们的 `a3-wmt-bridge.c` 直接 include 了它们；没有它们补丁无法编译。
+
+因此 `kernel-src/.gitignore` 排除了这些目录（`gen3` `gen4m` `wmt` `wmt-adaptor`），
+改为**用脚本从厂商源码树导入**：
 
 ```sh
 # 从厂商 8.1 内核源码导入无线栈（只需做一次）

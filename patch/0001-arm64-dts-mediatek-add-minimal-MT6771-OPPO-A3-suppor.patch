@@ -1,7 +1,7 @@
-From 51bfd9e33abfe1df28b3cc1de6ca3a969b4dd278 Mon Sep 17 00:00:00 2001
+From 50442df550e97ec69276d2e2429c62037c6c4b41 Mon Sep 17 00:00:00 2001
 From: oppoa3-port <port@oppoa3.local>
 Date: Wed, 4 Nov 2026 00:15:17 +0800
-Subject: [PATCH 01/12] arm64: dts: mediatek: add minimal MT6771 / OPPO A3
+Subject: [PATCH 1/5] arm64: dts: mediatek: add minimal MT6771 / OPPO A3
  support
 
 First (M1a) boot-test device tree for the OPPO A3 (PADT00, MT6771).

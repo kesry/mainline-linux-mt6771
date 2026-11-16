@@ -26,18 +26,23 @@ echo "厂商源码: $VENDOR"
 echo "内核源码: $KERNEL"
 
 # 厂商树里无线代码的相对路径（按实际存在的目录逐个尝试）
-SRC_REL="drivers/net/wireless/mediatek/btif"
+SRC_REL="drivers/net/wireless/mediatek"
 DST="$KERNEL/drivers/net/wireless/mediatek"
 
 if [ ! -d "$VENDOR/$SRC_REL" ]; then
 	echo "在厂商树里没找到 $SRC_REL" >&2
-	echo "请先确认厂商树路径，或用 ls 找到实际目录后修改本脚本" >&2
 	exit 1
 fi
 
-echo "复制 $SRC_REL ..."
-mkdir -p "$DST"
-cp -a "$VENDOR/$SRC_REL" "$DST/"
+# 只复制厂商的实现在目录，不覆盖我们自己的胶水层
+for d in gen3 gen4m wmt wmt-adaptor btif mt66xx; do
+	if [ -d "$VENDOR/$SRC_REL/$d" ]; then
+		echo "复制 $d ..."
+		mkdir -p "$DST"
+		rm -rf "$DST/$d"
+		cp -a "$VENDOR/$SRC_REL/$d" "$DST/"
+	fi
+done
 
 # 厂商树里的 BTIF 兼容层（如果存在）
 for extra in "drivers/staging/btif"; do
