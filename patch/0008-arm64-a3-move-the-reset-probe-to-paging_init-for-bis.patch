@@ -1,0 +1,74 @@
+From 102cd8a24813a0a30e72121e0edefa79e9d9c367 Mon Sep 17 00:00:00 2001
+From: oppoa3-port <port@oppoa3.local>
+Date: Wed, 4 Nov 2026 21:32:43 +0800
+Subject: [PATCH 08/12] arm64: a3: move the reset probe to paging_init for
+ bisecting
+
+The kernel dies before do_initcalls on MT6771 (proven by the initcall-time
+reset probe: the board still takes ~60 s, i.e. LK's watchdog, not our reset).
+Bisect backwards: fire the TopRGU reset as soon as paging_init() returns, the
+earliest point where ioremap works. A fast reboot then proves setup_arch()
+completed.
+---
+ arch/arm64/Kconfig                 | 8 ++++++++
+ arch/arm64/kernel/a3-early-paint.c | 3 ++-
+ arch/arm64/kernel/setup.c          | 4 ++++
+ 3 files changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/Kconfig b/arch/arm64/Kconfig
+index d78d5b7c4..40523bd16 100644
+--- a/arch/arm64/Kconfig
++++ b/arch/arm64/Kconfig
+@@ -2556,6 +2556,14 @@ config A3_EARLY_PAINT
+ 
+ 	  Say N for anything but bring-up.
+ 
++config A3_RESET_AT_PAGING_INIT
++	bool "Force a TopRGU reset right after paging_init"
++	depends on A3_EARLY_PAINT
++	help
++	  TEMPORARY bring-up aid. Same idea as A3_REBOOT_AT_INITCALL but much
++	  earlier: fires as soon as paging_init() returns, i.e. as soon as
++	  ioremap works at all. A fast reboot proves setup_arch() completed.
++
+ config A3_REBOOT_AT_INITCALL
+ 	bool "Force a TopRGU reset from early_initcall"
+ 	depends on A3_EARLY_PAINT
+diff --git a/arch/arm64/kernel/a3-early-paint.c b/arch/arm64/kernel/a3-early-paint.c
+index 3d1f640e8..efe0a4dc5 100644
+--- a/arch/arm64/kernel/a3-early-paint.c
++++ b/arch/arm64/kernel/a3-early-paint.c
+@@ -72,7 +72,7 @@ void a3_paint(u32 colour)
+ #define A3_WDT_MODE_KEY		0x22000000
+ #define A3_WDT_SWRST_KEY	0x1209
+ 
+-static void a3_force_reset(void)
++void a3_force_reset(void)
+ {
+ 	void __iomem *wdt = ioremap(A3_TOPRGU_BASE, 0x1000);
+ 	u32 reg;
+@@ -111,6 +111,7 @@ early_initcall(a3_paint_early);
+ 
+ /* Called from setup_arch()/start_kernel() before initcalls exist. */
+ EXPORT_SYMBOL_GPL(a3_paint);
++EXPORT_SYMBOL_GPL(a3_force_reset);
+ core_initcall(a3_paint_core);
+ postcore_initcall(a3_paint_postcore);
+ arch_initcall(a3_paint_arch);
+diff --git a/arch/arm64/kernel/setup.c b/arch/arm64/kernel/setup.c
+index 5965caa03..4ea3548e3 100644
+--- a/arch/arm64/kernel/setup.c
++++ b/arch/arm64/kernel/setup.c
+@@ -337,8 +337,12 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+ #ifdef CONFIG_A3_EARLY_PAINT
+ 	{
+ 		extern void a3_paint(u32 colour);
++		extern void a3_force_reset(void);
+ 		/* RED: paging_init() done -- earliest point where ioremap works */
+ 		a3_paint(0x00ff0000);
++#ifdef CONFIG_A3_RESET_AT_PAGING_INIT
++		a3_force_reset();	/* reboot NOW: proves setup_arch got this far */
++#endif
+ 	}
+ #endif
+ 

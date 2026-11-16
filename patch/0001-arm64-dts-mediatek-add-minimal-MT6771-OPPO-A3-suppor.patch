@@ -1,0 +1,281 @@
+From 51bfd9e33abfe1df28b3cc1de6ca3a969b4dd278 Mon Sep 17 00:00:00 2001
+From: oppoa3-port <port@oppoa3.local>
+Date: Wed, 4 Nov 2026 00:15:17 +0800
+Subject: [PATCH 01/12] arm64: dts: mediatek: add minimal MT6771 / OPPO A3
+ support
+
+First (M1a) boot-test device tree for the OPPO A3 (PADT00, MT6771).
+
+SoC level (mt6771.dtsi): CPUs, PSCI, GICv3, armv8 timer, TopRGU.
+Board level (mt6771-oppo-a3.dts): 4 GiB memory, simple-framebuffer on the
+buffer LK left behind, ramoops on the vendor ram_console region.
+
+All addresses are measured from the device, not copied from a sibling SoC:
+  - GIC/timer/PSCI: /sys/firmware/fdt (the DT LK handed to the stock kernel)
+  - TopRGU 0x10007000 / SPI 142: vendor dts + /proc/interrupts
+  - framebuffer 0x7d170000 / 16 MiB: chosen/atag,videolfb
+  - ramoops 0x54410000: persistent_ram regions in /proc/iomem
+
+No modem reserved-memory: cellular is out of scope, the RAM goes back to the
+kernel.
+
+This is a boot-test tree, not a finished port: no clock, pinctrl, power
+domain or display-engine nodes yet.
+---
+ arch/arm64/boot/dts/mediatek/Makefile         |   1 +
+ .../boot/dts/mediatek/mt6771-oppo-a3.dts      |  93 ++++++++++++
+ arch/arm64/boot/dts/mediatek/mt6771.dtsi      | 133 ++++++++++++++++++
+ 3 files changed, 227 insertions(+)
+ create mode 100644 arch/arm64/boot/dts/mediatek/mt6771-oppo-a3.dts
+ create mode 100644 arch/arm64/boot/dts/mediatek/mt6771.dtsi
+
+diff --git a/arch/arm64/boot/dts/mediatek/Makefile b/arch/arm64/boot/dts/mediatek/Makefile
+index 8fd7b2bb7..c79cebf7a 100644
+--- a/arch/arm64/boot/dts/mediatek/Makefile
++++ b/arch/arm64/boot/dts/mediatek/Makefile
+@@ -1,6 +1,7 @@
+ # SPDX-License-Identifier: GPL-2.0
+ dtb-$(CONFIG_ARCH_MEDIATEK) += mt2712-evb.dtb
+ dtb-$(CONFIG_ARCH_MEDIATEK) += mt6755-evb.dtb
++dtb-$(CONFIG_ARCH_MEDIATEK) += mt6771-oppo-a3.dtb
+ dtb-$(CONFIG_ARCH_MEDIATEK) += mt6779-evb.dtb
+ dtb-$(CONFIG_ARCH_MEDIATEK) += mt6795-evb.dtb
+ dtb-$(CONFIG_ARCH_MEDIATEK) += mt6795-sony-xperia-m5.dtb
+diff --git a/arch/arm64/boot/dts/mediatek/mt6771-oppo-a3.dts b/arch/arm64/boot/dts/mediatek/mt6771-oppo-a3.dts
+new file mode 100644
+index 000000000..ecbabe37d
+--- /dev/null
++++ b/arch/arm64/boot/dts/mediatek/mt6771-oppo-a3.dts
+@@ -0,0 +1,93 @@
++// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++/*
++ * OPPO A3 (2018) - PADM00 / PADT00 / CPH1837
++ * MediaTek MT6771 (Helio P60)
++ *
++ * Measured facts used here (see linux/docs/mt6771-facts.md):
++ *   RAM            : 4 GiB at 0x40000000  (/proc/iomem: System RAM ends at
++ *                    0x13fffefff; MemTotal 3,744,292 kB)
++ *   Framebuffer    : 0x7d170000, 16 MiB  (chosen/atag,videolfb in the DT that
++ *                    LK handed to the stock kernel)
++ *   Panel          : oppo17331_dpt_jdi_nt36672_1080p_dsi_vdo, 1080x2280,
++ *                    DSI video mode, 60.13 fps (/proc/cmdline lcm= parameter)
++ *   ramoops        : 0x54410000, ~896 KiB  (persistent_ram regions in
++ *                    /proc/iomem -- the vendor kernel's ram_console/pstore)
++ *
++ * Deliberate omissions for this first (M1a) boot test:
++ *   - no modem/CCIF/MD reserved-memory: we do not do cellular (user decision
++ *     K2), the RAM is handed back to the kernel.
++ *   - no clock / pinctrl / power-domain / display-engine nodes: without a
++ *     clock driver nothing gets gated, which is exactly what we want while
++ *     the panel is still driven by whatever LK set up.
++ */
++
++/dts-v1/;
++
++#include "mt6771.dtsi"
++
++/ {
++	model = "OPPO A3 (PADT00)";
++	compatible = "oppo,a3", "mediatek,mt6771";
++
++	chosen {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++
++		stdout-path = "framebuffer0";
++
++		/*
++		 * console=tty0 -> fbcon on the LK splash buffer.
++		 * clk_ignore_unused / pd_ignore_unused: see porting doc 5.3 pitfall 1
++		 * (a clock/power driver that probes later must not gate the DSI
++		 * clocks LK left running, or the panel goes black).
++		 * ignore_loglevel so the first lines are not swallowed.
++		 */
++		bootargs = "console=tty0 clk_ignore_unused pd_ignore_unused loglevel=8 ignore_loglevel";
++
++		framebuffer0: framebuffer@7d170000 {
++			compatible = "simple-framebuffer";
++			reg = <0x0 0x7d170000 0x0 0x1000000>;
++			width = <1080>;
++			height = <2280>;
++			stride = <4320>;	/* 1080 * 4 bytes */
++			/*
++			 * 32bpp is the usual MTK LK format, but it has NOT been
++			 * verified on this board yet. If the screen shows garbage
++			 * colours (rather than nothing), try "r5g6b5".
++			 */
++			format = "a8r8g8b8";
++		};
++	};
++
++	memory@40000000 {
++		device_type = "memory";
++		reg = <0x0 0x40000000 0x1 0x0>;	/* 4 GiB */
++	};
++
++	reserved-memory {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++
++		/* Keep the kernel's allocator away from LK's splash buffer. */
++		framebuffer_reserved: framebuffer@7d170000 {
++			reg = <0x0 0x7d170000 0x0 0x1000000>;
++			no-map;
++		};
++
++		/*
++		 * pstore/ramoops on the region the vendor kernel already uses
++		 * for ram_console. Survives a reboot (not a power loss), which
++		 * is the only way to read a panic on a board with no UART.
++		 */
++		ramoops: ramoops@54410000 {
++			compatible = "ramoops";
++			reg = <0x0 0x54410000 0x0 0x000e0000>;
++			record-size = <0x20000>;
++			console-size = <0x40000>;
++			pmsg-size = <0x20000>;
++			ftrace-size = <0x0>;
++		};
++	};
++};
+diff --git a/arch/arm64/boot/dts/mediatek/mt6771.dtsi b/arch/arm64/boot/dts/mediatek/mt6771.dtsi
+new file mode 100644
+index 000000000..b96e025d8
+--- /dev/null
++++ b/arch/arm64/boot/dts/mediatek/mt6771.dtsi
+@@ -0,0 +1,133 @@
++// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++/*
++ * MediaTek MT6771 (Helio P60) SoC
++ *
++ * All addresses/interrupts below are MEASURED from the target device
++ * (OPPO A3 / PADT00, MT6771). Sources:
++ *   - GIC / timer / PSCI / CPU topology: /sys/firmware/fdt (the DT that LK
++ *     actually handed to the stock kernel), decompiled with dtc.
++ *   - TopRGU base + IRQ: OPPO 4.4.95 vendor dts (arch/arm64/boot/dts/mediatek/
++ *     mt6771.dts) cross-checked against /proc/interrupts on the running device
++ *     ("MT_SYSIRQ 142 Edge mt_wdt").
++ *
++ * Do NOT "borrow" register offsets from other MediaTek SoCs -- see
++ * linux/docs/oppo-a3-mainline-porting.md section 6.1.
++ */
++
++#include <dt-bindings/interrupt-controller/arm-gic.h>
++#include <dt-bindings/interrupt-controller/irq.h>
++
++/ {
++	compatible = "mediatek,mt6771";
++	#address-cells = <2>;
++	#size-cells = <2>;
++	interrupt-parent = <&gic>;
++
++	cpus {
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		/* 4x Cortex-A53 (LITTLE) */
++		cpu0: cpu@0 {
++			device_type = "cpu";
++			compatible = "arm,cortex-a53";
++			reg = <0x0>;
++			enable-method = "psci";
++		};
++
++		cpu1: cpu@1 {
++			device_type = "cpu";
++			compatible = "arm,cortex-a53";
++			reg = <0x1>;
++			enable-method = "psci";
++		};
++
++		cpu2: cpu@2 {
++			device_type = "cpu";
++			compatible = "arm,cortex-a53";
++			reg = <0x2>;
++			enable-method = "psci";
++		};
++
++		cpu3: cpu@3 {
++			device_type = "cpu";
++			compatible = "arm,cortex-a53";
++			reg = <0x3>;
++			enable-method = "psci";
++		};
++
++		/* 4x Cortex-A73 (big) */
++		cpu4: cpu@100 {
++			device_type = "cpu";
++			compatible = "arm,cortex-a73";
++			reg = <0x100>;
++			enable-method = "psci";
++		};
++
++		cpu5: cpu@101 {
++			device_type = "cpu";
++			compatible = "arm,cortex-a73";
++			reg = <0x101>;
++			enable-method = "psci";
++		};
++
++		cpu6: cpu@102 {
++			device_type = "cpu";
++			compatible = "arm,cortex-a73";
++			reg = <0x102>;
++			enable-method = "psci";
++		};
++
++		cpu7: cpu@103 {
++			device_type = "cpu";
++			compatible = "arm,cortex-a73";
++			reg = <0x103>;
++			enable-method = "psci";
++		};
++	};
++
++	psci {
++		compatible = "arm,psci-1.0";
++		method = "smc";
++	};
++
++	/* GICv3: distributor + redistributor (measured from /sys/firmware/fdt) */
++	gic: interrupt-controller@c000000 {
++		compatible = "arm,gic-v3";
++		reg = <0x0 0x0c000000 0x0 0x40000>,	/* GICD */
++		      <0x0 0x0c100000 0x0 0x200000>;	/* GICR */
++		#interrupt-cells = <3>;
++		#address-cells = <2>;
++		#size-cells = <2>;
++		#redistributor-regions = <1>;
++		interrupt-controller;
++		interrupts = <GIC_PPI 9 IRQ_TYPE_LEVEL_HIGH>;
++	};
++
++	timer {
++		compatible = "arm,armv8-timer";
++		interrupts = <GIC_PPI 13 IRQ_TYPE_LEVEL_LOW>,
++			     <GIC_PPI 14 IRQ_TYPE_LEVEL_LOW>,
++			     <GIC_PPI 11 IRQ_TYPE_LEVEL_LOW>,
++			     <GIC_PPI 10 IRQ_TYPE_LEVEL_LOW>;
++	};
++
++	/*
++	 * TopRGU (system watchdog). Same address as every other MediaTek SoC
++	 * we know of; the register layout matches drivers/watchdog/mtk_wdt.c
++	 * (WDT_MODE=0x00, WDT_MODE_EN=bit0, WDT_MODE_KEY=0x22000000).
++	 *
++	 * mt6771 has no dedicated compatible upstream yet, so bind to
++	 * mt8183-wdt (same TopRGU block, only .toprgu_sw_rst_num differs and
++	 * we do not use the reset controller here).
++	 *
++	 * LK arms this watchdog before starting the kernel, and there is no
++	 * way to observe a reset (no UART). Keeping the driver built in lets
++	 * the watchdog core stop it on probe, otherwise the board resets after
++	 * roughly 20-30 seconds.
++	 */
++	watchdog: watchdog@10007000 {
++		compatible = "mediatek,mt8183-wdt";
++		reg = <0x0 0x10007000 0x0 0x100>;
++	};
++};

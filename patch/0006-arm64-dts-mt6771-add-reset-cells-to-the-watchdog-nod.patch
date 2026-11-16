@@ -1,0 +1,37 @@
+From 614d93164db4987d4659d4e359724c2b446c99fb Mon Sep 17 00:00:00 2001
+From: oppoa3-port <port@oppoa3.local>
+Date: Wed, 4 Nov 2026 20:24:32 +0800
+Subject: [PATCH 06/12] arm64: dts: mt6771: add #reset-cells to the watchdog
+ node
+
+mtk_wdt_probe() calls toprgu_register_reset_controller() and returns its
+error. devm_reset_controller_register() needs #reset-cells in the node, so
+without it the probe fails, the watchdog device is never registered, and the
+watchdog core never stops the watchdog LK armed -- the board resets after
+~30 s regardless of how far the kernel got.
+
+This makes the reset timing a usable liveness signal: if the kernel reaches
+device_initcall the board stops resetting.
+---
+ arch/arm64/boot/dts/mediatek/mt6771.dtsi | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/mediatek/mt6771.dtsi b/arch/arm64/boot/dts/mediatek/mt6771.dtsi
+index 68f3cb0a1..845570fe8 100644
+--- a/arch/arm64/boot/dts/mediatek/mt6771.dtsi
++++ b/arch/arm64/boot/dts/mediatek/mt6771.dtsi
+@@ -163,5 +163,14 @@ uart0: serial@11002000 {
+ 	watchdog: watchdog@10007000 {
+ 		compatible = "mediatek,mt8183-wdt";
+ 		reg = <0x0 0x10007000 0x0 0x100>;
++		/*
++		 * Required: mtk_wdt_probe() registers a reset controller and
++		 * returns the error if that fails. Without #reset-cells the
++		 * registration fails, the probe bails out, the watchdog device
++		 * is never registered and the watchdog core therefore never
++		 * stops the watchdog that LK armed -- the board resets after
++		 * ~30 s no matter how far the kernel got.
++		 */
++		#reset-cells = <1>;
+ 	};
+ };

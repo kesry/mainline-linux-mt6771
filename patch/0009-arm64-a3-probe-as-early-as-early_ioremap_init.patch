@@ -1,0 +1,106 @@
+From 1a0f269512a10ec1ef8fa89f023bbae1a27c6a9a Mon Sep 17 00:00:00 2001
+From: oppoa3-port <port@oppoa3.local>
+Date: Wed, 4 Nov 2026 21:39:48 +0800
+Subject: [PATCH 09/12] arm64: a3: probe as early as early_ioremap_init()
+
+paging_init() is never reached on MT6771 (the reset probe did not fire), so
+bisect further back: fire the TopRGU reset from setup_arch() right after
+early_ioremap_init(), i.e. before setup_machine_fdt() parses the device tree.
+
+A fast reboot means the kernel survived decompression and reached setup_arch,
+pointing at device-tree parsing as the failure. A slow one means it dies even
+earlier.
+---
+ arch/arm64/Kconfig                 | 10 ++++++++++
+ arch/arm64/kernel/a3-early-paint.c | 25 +++++++++++++++++++++++++
+ arch/arm64/kernel/setup.c          | 13 +++++++++++++
+ 3 files changed, 48 insertions(+)
+
+diff --git a/arch/arm64/Kconfig b/arch/arm64/Kconfig
+index 40523bd16..9e4e0ecdb 100644
+--- a/arch/arm64/Kconfig
++++ b/arch/arm64/Kconfig
+@@ -2556,6 +2556,16 @@ config A3_EARLY_PAINT
+ 
+ 	  Say N for anything but bring-up.
+ 
++config A3_RESET_AT_EARLY_IOREMAP
++	bool "Force a TopRGU reset right after early_ioremap_init()"
++	depends on A3_EARLY_PAINT
++	help
++	  TEMPORARY bring-up aid. The earliest probe possible: fires in
++	  setup_arch() right after early_ioremap_init(), i.e. before
++	  setup_machine_fdt() parses the device tree. A fast reboot proves the
++	  kernel survived decompression and reached setup_arch; a slow one means
++	  it never got that far.
++
+ config A3_RESET_AT_PAGING_INIT
+ 	bool "Force a TopRGU reset right after paging_init"
+ 	depends on A3_EARLY_PAINT
+diff --git a/arch/arm64/kernel/a3-early-paint.c b/arch/arm64/kernel/a3-early-paint.c
+index efe0a4dc5..d93df3fdd 100644
+--- a/arch/arm64/kernel/a3-early-paint.c
++++ b/arch/arm64/kernel/a3-early-paint.c
+@@ -24,6 +24,7 @@
+  */
+ 
+ #include <linux/init.h>
++#include <asm/early_ioremap.h>
+ #include <linux/delay.h>
+ #include <linux/io.h>
+ #include <linux/kernel.h>
+@@ -92,6 +93,30 @@ void a3_force_reset(void)
+ 	}
+ }
+ 
++/*
++ * Same forced reset, but usable before paging_init(): uses early_ioremap()
++ * instead of ioremap(). Must be called after early_ioremap_init().
++ */
++void a3_force_reset_early(void)
++{
++	void __iomem *wdt = early_ioremap(A3_TOPRGU_BASE, 0x1000);
++	u32 reg;
++	int i;
++
++	if (!wdt)
++		return;
++
++	reg = readl(wdt + A3_WDT_MODE);
++	reg &= ~A3_WDT_MODE_IRQ_EN;
++	writel(reg | A3_WDT_MODE_KEY, wdt + A3_WDT_MODE);
++
++	for (i = 0; i < 200; i++) {
++		writel(A3_WDT_SWRST_KEY, wdt + A3_WDT_SWRST);
++		udelay(500);
++	}
++}
++EXPORT_SYMBOL_GPL(a3_force_reset_early);
++
+ static int __init a3_paint_early(void)
+ {
+ 	a3_paint(0x00ffff00);	/* YELLOW: do_initcalls started */
+diff --git a/arch/arm64/kernel/setup.c b/arch/arm64/kernel/setup.c
+index 4ea3548e3..b4c0ca469 100644
+--- a/arch/arm64/kernel/setup.c
++++ b/arch/arm64/kernel/setup.c
+@@ -290,6 +290,19 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
+ 	early_fixmap_init();
+ 	early_ioremap_init();
+ 
++#ifdef CONFIG_A3_RESET_AT_EARLY_IOREMAP
++	{
++		extern void a3_force_reset_early(void);
++		/*
++		 * Reaching here proves the kernel got past decompression and the
++		 * very first setup_arch steps. Firing a TopRGU reset now makes the
++		 * board come back in seconds instead of the ~30 s the LK watchdog
++		 * takes, which is the only liveness signal this board gives us.
++		 */
++		a3_force_reset_early();
++	}
++#endif
++
+ 	setup_machine_fdt(__fdt_pointer);
+ 
+ 	/*

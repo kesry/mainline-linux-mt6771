@@ -1,0 +1,288 @@
+From b52841da0ad62d8e967f85cf5daa3f3b558d02cc Mon Sep 17 00:00:00 2001
+From: oppoa3-port <port@oppoa3.local>
+Date: Wed, 4 Nov 2026 01:18:58 +0800
+Subject: [PATCH 05/12] arm64: dts: mt6771: add DTBO stub symbols so LK can
+ apply the vendor overlay
+
+ROOT CAUSE of the kernel never starting.
+
+LK applies the vendor odmdtbo overlay (entry 2 of 13) onto the boot.img DTB
+before jumping to the kernel. That overlay resolves its targets by SYMBOL
+NAME: its /__fixups__ node lists 54 symbols (chosen, pio, i2c0..i2c11, mtkfb,
+touch, scp, consys, ...) that must exist in the base DTB's /__symbols__.
+
+A hand-written minimal DTB has no /__symbols__ at all, so ufdt_apply_overlay()
+fails, LK logs "boot image dtb_overlay fail" and refuses to boot -- the
+kernel is never executed, the screen keeps showing the fastboot UI and the
+watchdog resets the board ~30 s later.
+
+Fix: emit inert stub nodes carrying those 53 labels (chosen already existed)
+and build the DTB with -@ so /__symbols__ is generated. Nothing in mainline
+matches "oppo,a3-dtbo-stub" and the stubs are disabled, so the overlay's
+content lands on nodes the kernel ignores.
+---
+ arch/arm64/boot/dts/mediatek/Makefile         |   2 +
+ .../boot/dts/mediatek/mt6771-oppo-a3.dts      | 232 +++++++++++++++++-
+ 2 files changed, 233 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/mediatek/Makefile b/arch/arm64/boot/dts/mediatek/Makefile
+index c79cebf7a..5c1ffa072 100644
+--- a/arch/arm64/boot/dts/mediatek/Makefile
++++ b/arch/arm64/boot/dts/mediatek/Makefile
+@@ -2,6 +2,8 @@
+ dtb-$(CONFIG_ARCH_MEDIATEK) += mt2712-evb.dtb
+ dtb-$(CONFIG_ARCH_MEDIATEK) += mt6755-evb.dtb
+ dtb-$(CONFIG_ARCH_MEDIATEK) += mt6771-oppo-a3.dtb
++# -@ emits /__symbols__, required so LK can apply the vendor odmdtbo overlay
++DTC_FLAGS_mt6771-oppo-a3 := -@
+ dtb-$(CONFIG_ARCH_MEDIATEK) += mt6779-evb.dtb
+ dtb-$(CONFIG_ARCH_MEDIATEK) += mt6795-evb.dtb
+ dtb-$(CONFIG_ARCH_MEDIATEK) += mt6795-sony-xperia-m5.dtb
+diff --git a/arch/arm64/boot/dts/mediatek/mt6771-oppo-a3.dts b/arch/arm64/boot/dts/mediatek/mt6771-oppo-a3.dts
+index ecbabe37d..000f44fcf 100644
+--- a/arch/arm64/boot/dts/mediatek/mt6771-oppo-a3.dts
++++ b/arch/arm64/boot/dts/mediatek/mt6771-oppo-a3.dts
+@@ -29,7 +29,7 @@ / {
+ 	model = "OPPO A3 (PADT00)";
+ 	compatible = "oppo,a3", "mediatek,mt6771";
+ 
+-	chosen {
++	chosen: chosen {
+ 		#address-cells = <2>;
+ 		#size-cells = <2>;
+ 		ranges;
+@@ -90,4 +90,234 @@ ramoops: ramoops@54410000 {
+ 			ftrace-size = <0x0>;
+ 		};
+ 	};
++
++	/*
++	 * DTBO overlay stub nodes.
++	 *
++	 * LK applies the vendor's odmdtbo overlay (entry 2 of 13) on top of this
++	 * DTB before starting the kernel. That overlay resolves its targets by
++	 * SYMBOL NAME through /__symbols__ (see its /__fixups__ node), so every
++	 * symbol it references must exist here or the overlay fails and LK
++	 * refuses to boot at all ("boot image dtb_overlay fail").
++	 *
++	 * These are deliberately inert: nothing in mainline matches
++	 * "oppo,a3-dtbo-stub" and they are disabled, so the overlay's content
++	 * lands on nodes the kernel ignores. They exist purely to make the
++	 * overlay applicable.
++	 *
++	 * Generated from dtbo entry 2 __fixups__ -- regenerate if the overlay
++	 * ever changes.
++	 */
++	accdet: stub-accdet {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	apuart0: stub-apuart0 {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	audgpio: stub-audgpio {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	auxadc: stub-auxadc {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	consys: stub-consys {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	dsi_te: stub-dsi_te {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	goodix_fp: stub-goodix_fp {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	gpio: stub-gpio {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	gpio_usage_mapping: stub-gpio_usage_mapping {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	gyro: stub-gyro {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	i2c0: stub-i2c0 {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	i2c1: stub-i2c1 {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	i2c10: stub-i2c10 {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	i2c11: stub-i2c11 {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	i2c2: stub-i2c2 {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	i2c3: stub-i2c3 {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	i2c4: stub-i2c4 {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	i2c5: stub-i2c5 {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	i2c6: stub-i2c6 {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	i2c7: stub-i2c7 {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	i2c8: stub-i2c8 {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	i2c9: stub-i2c9 {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	irtx_pwm: stub-irtx_pwm {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	kd_camera_hw1: stub-kd_camera_hw1 {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	keypad: stub-keypad {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	main_pmic: stub-main_pmic {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	md1_sim1_hot_plug_eint: stub-md1_sim1_hot_plug_eint {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	md1_sim2_hot_plug_eint: stub-md1_sim2_hot_plug_eint {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	mediatek_phy_tuning: stub-mediatek_phy_tuning {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	motor_drv: stub-motor_drv {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	motor_pl: stub-motor_pl {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	mrdump_ext_rst: stub-mrdump_ext_rst {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	msdc1: stub-msdc1 {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	msdc1_ins: stub-msdc1_ins {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	mt6370_pmu: stub-mt6370_pmu {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	mt6370_typec: stub-mt6370_typec {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	mtkfb: stub-mtkfb {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	mt_pmic_vcama1_ldo_reg: stub-mt_pmic_vcama1_ldo_reg {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	mt_pmic_vcama2_ldo_reg: stub-mt_pmic_vcama2_ldo_reg {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	mt_pmic_vcamd_ldo_reg: stub-mt_pmic_vcamd_ldo_reg {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	mt_pmic_vcamio_ldo_reg: stub-mt_pmic_vcamio_ldo_reg {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	mt_pmic_vldo28_ldo_reg: stub-mt_pmic_vldo28_ldo_reg {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	mt_pmic_vsim1_ldo_reg: stub-mt_pmic_vsim1_ldo_reg {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	mt_pmic_vsim2_ldo_reg: stub-mt_pmic_vsim2_ldo_reg {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	odm: stub-odm {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	otg_iddig: stub-otg_iddig {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	pio: stub-pio {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	pmic_clock_buffer_ctrl: stub-pmic_clock_buffer_ctrl {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	rt9465_slave_chr: stub-rt9465_slave_chr {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	scp: stub-scp {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	smart_pa: stub-smart_pa {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	subpmic_pmu_eint: stub-subpmic_pmu_eint {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
++	touch: stub-touch {
++		compatible = "oppo,a3-dtbo-stub";
++		status = "disabled";
++	};
+ };

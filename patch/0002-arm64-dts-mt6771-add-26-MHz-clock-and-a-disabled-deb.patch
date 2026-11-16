@@ -1,0 +1,62 @@
+From b80c13454301d378e91fb0215a1f20227f415c06 Mon Sep 17 00:00:00 2001
+From: oppoa3-port <port@oppoa3.local>
+Date: Wed, 4 Nov 2026 00:25:54 +0800
+Subject: [PATCH 02/12] arm64: dts: mt6771: add 26 MHz clock and a disabled
+ debug UART
+
+The board has no UART test point wired up, so the node stays disabled for
+now: a wrong IRQ guess must not be allowed to stall the very first boot.
+Enable it (status = okay) once serial is physically accessible.
+
+Also add the 26 MHz fixed clock every peripheral clock derives from.
+---
+ arch/arm64/boot/dts/mediatek/mt6771.dtsi | 36 ++++++++++++++++++++++++
+ 1 file changed, 36 insertions(+)
+
+diff --git a/arch/arm64/boot/dts/mediatek/mt6771.dtsi b/arch/arm64/boot/dts/mediatek/mt6771.dtsi
+index b96e025d8..02cf37ecd 100644
+--- a/arch/arm64/boot/dts/mediatek/mt6771.dtsi
++++ b/arch/arm64/boot/dts/mediatek/mt6771.dtsi
+@@ -112,6 +112,42 @@ timer {
+ 			     <GIC_PPI 10 IRQ_TYPE_LEVEL_LOW>;
+ 	};
+ 
++	/*
++	 * 26 MHz crystal. Every clock on this SoC is derived from it, and the
++	 * UART needs it before any clock driver exists. Value taken from the
++	 * vendor DT (clk26m = 26 MHz).
++	 */
++	clk26m: clock-26m {
++		compatible = "fixed-clock";
++		#clock-cells = <0>;
++		clock-frequency = <26000000>;
++		clock-output-names = "clk26m";
++	};
++
++	/*
++	 * Debug UART. Same IP as every other MediaTek SoC (8250-compatible,
++	 * drivers/tty/serial/8250/8250_mtk.c). Address from /proc/iomem, IRQ
++	 * from the vendor DT (SPI 91 after sysirq translation).
++	 *
++	 * The board has no UART test points wired up, so this is here so that
++	 * (a) a serial console exists the moment somebody attaches a wire, and
++	 * (b) console=ttyS0 does not silently fail.
++	 *
++	 * The baud clock is modelled as the 26 MHz crystal. If the real divider
++	 * differs the output will be garbled rather than absent -- that is a
++	 * cheap thing to recognise.
++	 */
++	uart0: serial@11002000 {
++		compatible = "mediatek,mt6577-uart";
++		reg = <0x0 0x11002000 0x0 0x1000>;
++		interrupts = <GIC_SPI 91 IRQ_TYPE_LEVEL_HIGH>;
++		clocks = <&clk26m>, <&clk26m>;
++		clock-names = "baud", "bus";
++		/* No UART test point on this board: keep the node for later, */
++		/* but do not let a possibly-wrong IRQ stall the first boot.  */
++		status = "disabled";
++	};
++
+ 	/*
+ 	 * TopRGU (system watchdog). Same address as every other MediaTek SoC
+ 	 * we know of; the register layout matches drivers/watchdog/mtk_wdt.c

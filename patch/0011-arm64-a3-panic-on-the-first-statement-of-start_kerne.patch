@@ -1,0 +1,56 @@
+From ae5e8450496cb2c9bd7c9472312365725e6e2690 Mon Sep 17 00:00:00 2001
+From: oppoa3-port <port@oppoa3.local>
+Date: Wed, 4 Nov 2026 23:50:31 +0800
+Subject: [PATCH 11/12] arm64: a3: panic on the first statement of
+ start_kernel()
+
+The earliest probe that can run with the MMU already on. It separates 'died in
+head.S / __primary_switch' from 'died in setup_arch', which is the question the
+early_ioremap probe left open once LK could finally be made to jump.
+---
+ arch/arm64/Kconfig |  9 +++++++++
+ init/main.c        | 11 +++++++++++
+ 2 files changed, 20 insertions(+)
+
+diff --git a/arch/arm64/Kconfig b/arch/arm64/Kconfig
+index 9e4e0ecdb..1a0cbaa40 100644
+--- a/arch/arm64/Kconfig
++++ b/arch/arm64/Kconfig
+@@ -2556,6 +2556,15 @@ config A3_EARLY_PAINT
+ 
+ 	  Say N for anything but bring-up.
+ 
++config A3_PANIC_AT_START_KERNEL
++	bool "Panic at the top of start_kernel()"
++	depends on A3_EARLY_PAINT
++	help
++	  TEMPORARY bring-up aid. The earliest probe that can run with the MMU
++	  already on: fires on the first statement of start_kernel(), before any
++	  architecture setup. A fast reboot proves head.S, the MMU enable and the
++	  relocation all succeeded.
++
+ config A3_RESET_AT_EARLY_IOREMAP
+ 	bool "Force a TopRGU reset right after early_ioremap_init()"
+ 	depends on A3_EARLY_PAINT
+diff --git a/init/main.c b/init/main.c
+index 329e0363f..718342d1e 100644
+--- a/init/main.c
++++ b/init/main.c
+@@ -876,6 +876,17 @@ void start_kernel(void)
+ 	char *command_line;
+ 	char *after_dashes;
+ 
++#ifdef CONFIG_A3_PANIC_AT_START_KERNEL
++	/*
++	 * TEMPORARY bring-up probe. Reaching here means head.S and
++	 * __primary_switch (MMU on, kernel relocated) all completed. Combined
++	 * with CONFIG_PANIC_TIMEOUT the board reboots within seconds, which is
++	 * the only liveness signal this UART-less board gives us: LK's watchdog
++	 * would otherwise take ~60 s and look identical to "never ran".
++	 */
++	panic("A3PROBE: start_kernel");
++#endif
++
+ 	set_task_stack_end_magic(&init_task);
+ 	smp_setup_processor_id();
+ 	debug_objects_early_init();

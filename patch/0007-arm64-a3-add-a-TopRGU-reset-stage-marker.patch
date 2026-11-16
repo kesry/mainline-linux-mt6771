@@ -1,0 +1,111 @@
+From 5b516da3011d738389e2030b1a9066081b2efb43 Mon Sep 17 00:00:00 2001
+From: oppoa3-port <port@oppoa3.local>
+Date: Wed, 4 Nov 2026 21:18:26 +0800
+Subject: [PATCH 07/12] arm64: a3: add a TopRGU reset stage marker
+
+The board has no UART, and the framebuffer we paint may not be the layer the
+panel is actually scanning out, so the paint probe cannot be trusted to prove
+liveness.
+
+Add CONFIG_A3_REBOOT_AT_INITCALL: early_initcall triggers a TopRGU software
+reset (same register sequence as mtk_wdt_restart). If the board comes back in
+a couple of seconds the kernel demonstrably reached do_initcalls; if it still
+takes ~30 s that is LK's watchdog firing because the kernel never got there.
+---
+ arch/arm64/Kconfig                 | 14 ++++++++
+ arch/arm64/kernel/a3-early-paint.c | 52 +++++++++++++++++++++++++++++-
+ 2 files changed, 65 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm64/Kconfig b/arch/arm64/Kconfig
+index 9328b4d0c..d78d5b7c4 100644
+--- a/arch/arm64/Kconfig
++++ b/arch/arm64/Kconfig
+@@ -2556,4 +2556,18 @@ config A3_EARLY_PAINT
+ 
+ 	  Say N for anything but bring-up.
+ 
++config A3_REBOOT_AT_INITCALL
++	bool "Force a TopRGU reset from early_initcall"
++	depends on A3_EARLY_PAINT
++	help
++	  TEMPORARY bring-up aid.
++
++	  Triggers a TopRGU software reset from early_initcall. The board then
++	  reboots within a couple of seconds instead of the ~30 s the LK-armed
++	  watchdog would take, which proves the kernel reached do_initcalls.
++	  Without this the only observable is "it rebooted at some point", which
++	  cannot distinguish "kernel never ran" from "kernel ran and hung later".
++
++	  Say N for anything but bring-up.
++
+ endmenu
+diff --git a/arch/arm64/kernel/a3-early-paint.c b/arch/arm64/kernel/a3-early-paint.c
+index 1f626135d..3d1f640e8 100644
+--- a/arch/arm64/kernel/a3-early-paint.c
++++ b/arch/arm64/kernel/a3-early-paint.c
+@@ -24,6 +24,7 @@
+  */
+ 
+ #include <linux/init.h>
++#include <linux/delay.h>
+ #include <linux/io.h>
+ #include <linux/kernel.h>
+ #include <linux/export.h>
+@@ -49,7 +50,56 @@ void a3_paint(u32 colour)
+ 	iounmap(fb);
+ }
+ 
+-static int __init a3_paint_early(void)		{ a3_paint(0x00ffff00); return 0; }  /* YELLOW */
++/*
++ * Force an immediate TopRGU software reset.
++ *
++ * This is the display-independent liveness probe. The board has no UART and
++ * the framebuffer may well be showing a layer LK left enabled rather than the
++ * buffer we paint, so "did the kernel get this far?" cannot be answered by
++ * looking at the screen.
++ *
++ * LK arms the watchdog, which resets the board ~30 s after handover if the
++ * kernel never stops it. If we trigger a reset ourselves from an initcall and
++ * the board comes back in a couple of seconds instead, the kernel demonstrably
++ * reached that initcall.
++ *
++ * Register sequence taken from drivers/watchdog/mtk_wdt.c (mtk_wdt_restart).
++ */
++#define A3_TOPRGU_BASE	0x10007000UL
++#define A3_WDT_MODE	0x00
++#define A3_WDT_SWRST	0x14
++#define A3_WDT_MODE_IRQ_EN	(1 << 3)
++#define A3_WDT_MODE_KEY		0x22000000
++#define A3_WDT_SWRST_KEY	0x1209
++
++static void a3_force_reset(void)
++{
++	void __iomem *wdt = ioremap(A3_TOPRGU_BASE, 0x1000);
++	u32 reg;
++	int i;
++
++	if (!wdt)
++		return;
++
++	/* Reset, not interrupt. */
++	reg = readl(wdt + A3_WDT_MODE);
++	reg &= ~A3_WDT_MODE_IRQ_EN;
++	writel(reg | A3_WDT_MODE_KEY, wdt + A3_WDT_MODE);
++
++	for (i = 0; i < 100; i++) {
++		writel(A3_WDT_SWRST_KEY, wdt + A3_WDT_SWRST);
++		udelay(500);
++	}
++}
++
++static int __init a3_paint_early(void)
++{
++	a3_paint(0x00ffff00);	/* YELLOW: do_initcalls started */
++#ifdef CONFIG_A3_REBOOT_AT_INITCALL
++	a3_force_reset();	/* reboot NOW: tells us we got this far */
++#endif
++	return 0;
++}
+ static int __init a3_paint_core(void)		{ a3_paint(0x00ffff00); return 0; }  /* YELLOW */
+ static int __init a3_paint_postcore(void)	{ a3_paint(0x00ffff00); return 0; }  /* YELLOW */
+ static int __init a3_paint_arch(void)		{ a3_paint(0x00ffff00); return 0; }  /* YELLOW */
