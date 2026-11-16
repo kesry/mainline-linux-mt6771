@@ -13,7 +13,10 @@ A3=${A3_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}
 SRC=$A3/kernel-src
 OUT=${A3_OUT:-$A3/qdiag}
 IMG=${A3_IMG:-$A3/vendor}
-STAGE=$A3/wv
+STAGE=${A3_STAGE:-$A3/wv}
+# 备份目录可能不存在（CI 的干净检出里就没有），创建失败就退到 /tmp
+mkdir -p "$STAGE" 2>/dev/null || STAGE=/tmp/a3-wv
+mkdir -p "$STAGE"
 
 NAME="${1:-boot-$(date +%m%d-%H%M)}"
 FLASH=0
