@@ -97,11 +97,11 @@ jobs:
           if [ -f vendor/a3-v186-tgpio.dtb ]; then
             export A3_DTB="$PWD/vendor/a3-v186-tgpio.dtb"
           fi
-          script/a3-mkboot.sh boot
-          cp -v "$PWD/vendor"/*.img out/boot.img 2>/dev/null || \
-            cp -v images/*.img out/boot.img 2>/dev/null || \
-            cp -v "$PWD"/*.img out/boot.img 2>/dev/null || true
-          ls -lh out/ || true
+          bash script/a3-mkboot.sh boot
+          test -f "$PWD/vendor/boot.img" || { echo "打包产物缺失"; ls -l vendor/; exit 1; }
+          cp -v "$PWD/vendor/boot.img" out/boot.img
+          ls -lh out/boot.img
+          md5sum out/boot.img
 
       - name: 构建 rootfs-minimal.img
         if: github.event_name != 'workflow_dispatch' || inputs.build_rootfs_minimal

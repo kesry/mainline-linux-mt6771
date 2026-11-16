@@ -5,3 +5,7 @@
 !vendor/a3-empty.cpio.gz
 !vendor/*.dtb
 !vendor/*.bin
+
+# Python 缓存
+__pycache__/
+*.pyc

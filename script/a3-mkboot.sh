@@ -82,7 +82,7 @@ green "  跳板已注入"
 # ------------------------------------------------- 3. 组装 boot.img
 say "3/6 组装 boot.img（空 ramdisk + v186 DTB + AVB 嫁接）"
 TARGET="$IMG/$NAME.img"
-python3 "$A3/mkbootimg-a3.py" \
+python3 "${A3_SCRIPTS:-$A3/script}/mkbootimg-a3.py" \
     --kernel   /tmp/a3_k2.gz \
     --ramdisk  "$IMG/a3-empty.cpio.gz" \
     --dtb      "${A3_DTB:-$IMG/a3-v186-good.dtb}" \
