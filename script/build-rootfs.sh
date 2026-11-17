@@ -90,13 +90,11 @@ if [ "$VARIANT" = "phosh" ]; then
         gnome-settings-daemon upower"
 fi
 
-say "阶段 7：创建用户与权限"
-in_root "id -u kesry >/dev/null 2>&1 || useradd -m -s /bin/bash -G video,render,input,audio,sudo kesry"
-in_root "echo 'kesry:kesry' | chpasswd"
-in_root "passwd -d root 2>/dev/null || true"
-mkdir -p "$ROOT/etc/sudoers.d"
-echo 'kesry ALL=(ALL) NOPASSWD:ALL' > "$ROOT/etc/sudoers.d/kesry"
-chmod 0440 "$ROOT/etc/sudoers.d/kesry"
+say "阶段 7：设置 root 密码"
+# 只保留 root 一个账号，密码 root。
+# 不要用 passwd -d：它把密码清成空，而 sshd 默认 PermitEmptyPasswords no，
+# 结果是 root 完全无法登录，日志只报 Access denied，看不出原因。
+in_root "echo 'root:root' | chpasswd"
 
 say "阶段 8：复合 USB gadget（RNDIS 网络 + ACM 串口）"
 # 这一块是设备唯一的管理通道：没有它就没有 usb0，也没法 ssh。
@@ -172,6 +170,17 @@ WantedBy=multi-user.target
 UNIT
 in_root "systemctl enable a3-usb-gadget.service"
 
+# ACM 串口还需要一个 getty 在 /dev/ttyGS0 上等登录，否则主机打开 COM 口
+# 只能看到空白，命令打进去没有任何响应。
+# 注意不能 enable serial-getty@ttyS0：那是 SoC 的 UART，本机没引出。
+ln -sf /lib/systemd/system/serial-getty@.service \
+       "$ROOT/etc/systemd/system/getty.target.wants/serial-getty@ttyGS0.service" 2>/dev/null || true
+mkdir -p "$ROOT/etc/systemd/system/getty.target.wants"
+ln -sf /lib/systemd/system/serial-getty@.service \
+       "$ROOT/etc/systemd/system/getty.target.wants/serial-getty@ttyGS0.service"
+in_root "systemctl enable serial-getty@ttyGS0.service" || \
+    warn "serial-getty@ttyGS0 启用失败，可开机后手动 systemctl enable"
+
 say "阶段 9：网络（USB RNDIS usb0）"
 mkdir -p "$ROOT/etc/systemd/network"
 cat > "$ROOT/etc/systemd/network/10-usb0.network" <<'EOF'
@@ -195,6 +204,14 @@ sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' "$ROOT/etc/s
 say "阶段 11：桌面会话与开机服务"
 if [ "$VARIANT" = "phosh" ]; then
     in_root "systemctl disable gdm 2>/dev/null || true"
+    # phosh.service 上游写死 User=1000 + TTYPath=/dev/tty7。
+    # 本镜像只有 root，改成 root 才能起来。
+    if [ -f "$ROOT/usr/lib/systemd/system/phosh.service" ]; then
+        sed -i 's/^User=.*/User=root/' "$ROOT/usr/lib/systemd/system/phosh.service"
+        mkdir -p "$ROOT/etc/systemd/system"
+        cp "$ROOT/usr/lib/systemd/system/phosh.service" \
+           "$ROOT/etc/systemd/system/phosh.service"
+    fi
     in_root "systemctl enable phosh.service 2>/dev/null || true"
     in_root "systemctl set-default graphical.target"
 

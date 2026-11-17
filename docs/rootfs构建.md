@@ -146,19 +146,3 @@ dd if=/dev/mmcblk0p44 bs=4M | gzip -1 > /root/rootfs-backup.img.gz
 ```
 
 备份产物很大（实际占用 4~5 GB），只在需要时做，不要放进仓库。
-
-## 9. 预置账号
-
-CI 构建出的镜像里有两个账号，都带密码：
-
-| 用户 | 密码 | 权限 |
-| --- | --- | --- |
-| `root` | `a3root` | 完整 root |
-| `kesry` | `kesry` | 属于 video/render/input/audio/sudo，sudo 免密 |
-
-sshd 已放开 `PermitRootLogin yes` 和 `PasswordAuthentication yes`，主机名 `PADT00`。
-
-**坑：不要用 `passwd -d root`。** 它把 root 密码清成空，而 sshd 默认
-`PermitEmptyPasswords no`，结果是 root 完全无法用 ssh 登录，日志只报
-`Access denied`，看不出是空密码导致的。要清空密码必须同时改
-`PermitEmptyPasswords yes`，但更安全的做法是直接设一个密码。
