@@ -90,11 +90,15 @@ if [ "$VARIANT" = "phosh" ]; then
         gnome-settings-daemon upower"
 fi
 
-say "阶段 7：设置 root 密码"
-# 只保留 root 一个账号，密码 root。
-# 不要用 passwd -d：它把密码清成空，而 sshd 默认 PermitEmptyPasswords no，
-# 结果是 root 完全无法登录，日志只报 Access denied，看不出原因。
+say "阶段 7：账号"
+# root/root     —— SSH 和串口管理
+# debian/debian —— 桌面会话（Wayland 拒绝以 root 运行，桌面必须有普通用户）
+# 不要用 passwd -d：清空密码后 sshd 默认 PermitEmptyPasswords no，
+# 只报 Access denied，看不出是空密码导致的。
 in_root "echo 'root:root' | chpasswd"
+
+in_root "id -u debian >/dev/null 2>&1 || useradd -m -s /bin/bash -G video,render,input,audio debian"
+in_root "echo 'debian:debian' | chpasswd"
 
 say "阶段 8：复合 USB gadget（RNDIS 网络 + ACM 串口）"
 # 这一块是设备唯一的管理通道：没有它就没有 usb0，也没法 ssh。
@@ -205,9 +209,9 @@ say "阶段 11：桌面会话与开机服务"
 if [ "$VARIANT" = "phosh" ]; then
     in_root "systemctl disable gdm 2>/dev/null || true"
     # phosh.service 上游写死 User=1000 + TTYPath=/dev/tty7。
-    # 本镜像只有 root，改成 root 才能起来。
+    # 桌面用 debian 用户（Wayland 不允许 root 跑桌面会话）。
     if [ -f "$ROOT/usr/lib/systemd/system/phosh.service" ]; then
-        sed -i 's/^User=.*/User=root/' "$ROOT/usr/lib/systemd/system/phosh.service"
+        sed -i 's/^User=.*/User=debian/' "$ROOT/usr/lib/systemd/system/phosh.service"
         mkdir -p "$ROOT/etc/systemd/system"
         cp "$ROOT/usr/lib/systemd/system/phosh.service" \
            "$ROOT/etc/systemd/system/phosh.service"
