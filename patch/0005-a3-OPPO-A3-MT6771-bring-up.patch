@@ -1,4 +1,4 @@
-From e9df6b7390a765c6bcae410b8ec4dd3b813b35f4 Mon Sep 17 00:00:00 2001
+From 3b359e60689ed56c2bd28105eb74a621b2f9c4eb Mon Sep 17 00:00:00 2001
 From: a3-port <a3@localhost>
 Date: Mon, 16 Nov 2026 22:42:39 +0800
 Subject: [PATCH 5/5] a3: OPPO A3 MT6771 bring-up
@@ -17,7 +17,7 @@ WiFi CONSYS 供电、WMAC 胶水层（厂商 btif 代码由脚本导入，不入
  arch/arm64/Kconfig                            |   49 +
  .../boot/dts/mediatek/mt6771-oppo-a3.dts      | 4831 ++++++++++++++++-
  arch/arm64/boot/dts/mediatek/mt6771.dtsi      |    4 +-
- arch/arm64/configs/a3_defconfig               |  900 +++
+ arch/arm64/configs/a3_defconfig               |  899 +++
  arch/arm64/kernel/Makefile                    |    3 +
  arch/arm64/kernel/a3-consys-power.c           |  409 ++
  arch/arm64/kernel/a3-gpu-power.c              |  153 +
@@ -68,7 +68,7 @@ WiFi CONSYS 供电、WMAC 胶水层（厂商 btif 代码由脚本导入，不入
  drivers/usb/mtu3/mtu3_host.c                  |   18 +-
  drivers/usb/mtu3/mtu3_plat.c                  |   49 +-
  init/main.c                                   |    4 +
- 55 files changed, 9890 insertions(+), 334 deletions(-)
+ 55 files changed, 9889 insertions(+), 334 deletions(-)
  create mode 100644 arch/arm64/configs/a3_defconfig
  create mode 100644 arch/arm64/kernel/a3-consys-power.c
  create mode 100644 arch/arm64/kernel/a3-gpu-power.c
@@ -5071,10 +5071,10 @@ index c2e3e487f..845570fe8 100644
  	/*
 diff --git a/arch/arm64/configs/a3_defconfig b/arch/arm64/configs/a3_defconfig
 new file mode 100644
-index 000000000..2a63c1bf8
+index 000000000..0396b077f
 --- /dev/null
 +++ b/arch/arm64/configs/a3_defconfig
-@@ -0,0 +1,900 @@
+@@ -0,0 +1,899 @@
 +CONFIG_SYSVIPC=y
 +CONFIG_POSIX_MQUEUE=y
 +CONFIG_NO_HZ_IDLE=y
@@ -5479,7 +5479,6 @@ index 000000000..2a63c1bf8
 +CONFIG_DRM_MEDIATEK=y
 +CONFIG_DRM_PANFROST=y
 +CONFIG_FB=y
-+CONFIG_FB_SIMPLE=y
 +CONFIG_FB_MODE_HELPERS=y
 +CONFIG_BACKLIGHT_CLASS_DEVICE=y
 +CONFIG_BACKLIGHT_PWM=m
