@@ -1,4 +1,4 @@
-From 136e72da30f4b1d915e2562e60cc59f06645753f Mon Sep 17 00:00:00 2001
+From c6daac0c1162febd2b6629f701baa572bb8db497 Mon Sep 17 00:00:00 2001
 From: a3-port <a3@localhost>
 Date: Mon, 16 Nov 2026 22:42:39 +0800
 Subject: [PATCH 5/5] a3: OPPO A3 MT6771 bring-up
@@ -27,7 +27,7 @@ WiFi CONSYS 供电、WMAC 胶水层（厂商 btif 代码由脚本导入，不入
  drivers/extcon/Kconfig                        |    7 +
  drivers/extcon/Makefile                       |    1 +
  drivers/extcon/extcon-a3-usb-id.c             |  118 +
- drivers/gpu/drm/mediatek/mtk_drm_drv.c        |    2 +
+ drivers/gpu/drm/mediatek/mtk_drm_drv.c        |   27 +
  drivers/gpu/drm/mediatek/mtk_dsi.c            |   16 +-
  drivers/gpu/drm/panel/Kconfig                 |   10 +
  drivers/gpu/drm/panel/Makefile                |    1 +
@@ -68,7 +68,7 @@ WiFi CONSYS 供电、WMAC 胶水层（厂商 btif 代码由脚本导入，不入
  drivers/usb/mtu3/mtu3_host.c                  |   18 +-
  drivers/usb/mtu3/mtu3_plat.c                  |   49 +-
  init/main.c                                   |    4 +
- 55 files changed, 9874 insertions(+), 334 deletions(-)
+ 55 files changed, 9899 insertions(+), 334 deletions(-)
  create mode 100644 arch/arm64/configs/a3_defconfig
  create mode 100644 arch/arm64/kernel/a3-consys-power.c
  create mode 100644 arch/arm64/kernel/a3-gpu-power.c
@@ -6794,15 +6794,54 @@ index 000000000..286978b3c
 +MODULE_DESCRIPTION("OPPO A3 USB ID extcon (GPIO41)");
 +MODULE_LICENSE("GPL");
 diff --git a/drivers/gpu/drm/mediatek/mtk_drm_drv.c b/drivers/gpu/drm/mediatek/mtk_drm_drv.c
-index 0ed249ccd..f6bbbe8b0 100644
+index 0ed249ccd..aebb72674 100644
 --- a/drivers/gpu/drm/mediatek/mtk_drm_drv.c
 +++ b/drivers/gpu/drm/mediatek/mtk_drm_drv.c
-@@ -339,6 +339,8 @@ static const struct of_device_id mtk_drm_of_ids[] = {
+@@ -152,6 +152,25 @@ static const unsigned int mt8183_mtk_ddp_main[] = {
+ 	DDP_COMPONENT_DSI0,
+ };
+ 
++/*
++ * MT6771: same pipeline as MT8183 minus the dither block.
++ * Mainline dropped the dither driver (DDP_COMPONENT_DITHER0 is not even in the
++ * enum any more), so reusing mt8183_mtk_ddp_main makes mtk_crtc_create() bail
++ * out at the dither slot -- node == NULL -> "Not creating crtc" -> no crtc at
++ * all, and the panel keeps showing whatever the bootloader left in the
++ * simple-framebuffer (garbled).
++ */
++static const unsigned int mt6771_mtk_ddp_main[] = {
++	DDP_COMPONENT_OVL0,
++	DDP_COMPONENT_OVL_2L0,
++	DDP_COMPONENT_RDMA0,
++	DDP_COMPONENT_COLOR0,
++	DDP_COMPONENT_CCORR,
++	DDP_COMPONENT_AAL0,
++	DDP_COMPONENT_GAMMA,
++	DDP_COMPONENT_DSI0,
++};
++
+ static const unsigned int mt8183_mtk_ddp_ext[] = {
+ 	DDP_COMPONENT_OVL_2L1,
+ 	DDP_COMPONENT_RDMA1,
+@@ -280,6 +299,12 @@ static const struct mtk_mmsys_driver_data mt8183_mmsys_driver_data = {
+ 	.mmsys_dev_num = 1,
+ };
+ 
++static const struct mtk_mmsys_driver_data mt6771_mmsys_driver_data = {
++	.main_path = mt6771_mtk_ddp_main,
++	.main_len = ARRAY_SIZE(mt6771_mtk_ddp_main),
++	.mmsys_dev_num = 1,
++};
++
+ static const struct mtk_mmsys_driver_data mt8186_mmsys_driver_data = {
+ 	.main_path = mt8186_mtk_ddp_main,
+ 	.main_len = ARRAY_SIZE(mt8186_mtk_ddp_main),
+@@ -339,6 +364,8 @@ static const struct of_device_id mtk_drm_of_ids[] = {
  	  .data = &mt8173_mmsys_driver_data},
  	{ .compatible = "mediatek,mt8183-mmsys",
  	  .data = &mt8183_mmsys_driver_data},
 +	{ .compatible = "mediatek,mt6765-mmsys",
-+	  .data = &mt8183_mmsys_driver_data},
++	  .data = &mt6771_mmsys_driver_data},
  	{ .compatible = "mediatek,mt8186-mmsys",
  	  .data = &mt8186_mmsys_driver_data},
  	{ .compatible = "mediatek,mt8188-vdosys0",
