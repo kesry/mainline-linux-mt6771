@@ -98,7 +98,81 @@ mkdir -p "$ROOT/etc/sudoers.d"
 echo 'kesry ALL=(ALL) NOPASSWD:ALL' > "$ROOT/etc/sudoers.d/kesry"
 chmod 0440 "$ROOT/etc/sudoers.d/kesry"
 
-say "阶段 8：网络（USB RNDIS usb0）"
+say "阶段 8：复合 USB gadget（RNDIS 网络 + ACM 串口）"
+# 这一块是设备唯一的管理通道：没有它就没有 usb0，也没法 ssh。
+# RNDIS 而不是 CDC-ECM：Windows 对 ECM 的 NDIS 适配器会报错 10，
+# 而 RNDIS 在 Windows 和 Linux(rndis_host) 都能用。
+# RNDIS 必须排在 ACM 前面，否则主机会重新枚举，串口会掉。
+install -d "$ROOT/usr/local/sbin"
+cat > "$ROOT/usr/local/sbin/a3-usb-gadget" <<'GADGET'
+#!/bin/sh
+# 建立 configfs 复合 gadget：先 RNDIS（网络），后 ACM（串口）。
+# 顺序不能换：先出现的功能会被主机记住。
+set -u
+G=/sys/kernel/config/usb_gadget/a3
+mountpoint -q /sys/kernel/config || mount -t configfs none /sys/kernel/config 2>/dev/null
+
+mkdir -p "$G" 2>/dev/null
+echo 0x1d6b > "$G/idVendor" 2>/dev/null
+echo 0x0104 > "$G/idProduct" 2>/dev/null
+echo 0x0100 > "$G/bcdDevice" 2>/dev/null
+echo 0x0200 > "$G/bcdUSB" 2>/dev/null
+echo 0xEF > "$G/bDeviceClass" 2>/dev/null
+echo 0x02 > "$G/bDeviceSubClass" 2>/dev/null
+echo 0x01 > "$G/bDeviceProtocol" 2>/dev/null
+
+mkdir -p "$G/strings/0x409" 2>/dev/null
+echo PADT00       > "$G/strings/0x409/serialnumber"
+echo OPPO         > "$G/strings/0x409/manufacturer"
+echo "A3 console" > "$G/strings/0x409/product"
+
+mkdir -p "$G/configs/c.1/strings/0x409" 2>/dev/null
+echo "RNDIS+ACM" > "$G/configs/c.1/strings/0x409/configuration"
+echo 120        > "$G/configs/c.1/MaxPower" 2>/dev/null
+
+# STEP 1: RNDIS 网络，必须第一个
+if mkdir -p "$G/functions/rndis.usb0" 2>/dev/null; then
+    echo "02:00:a3:00:00:01" > "$G/functions/rndis.usb0/host_addr" 2>/dev/null
+    echo "02:00:a3:00:00:02" > "$G/functions/rndis.usb0/dev_addr"  2>/dev/null
+    ln -sf "$G/functions/rndis.usb0" "$G/configs/c.1/rndis.usb0" 2>/dev/null
+    echo "a3-usb-gadget: RNDIS linked"
+else
+    echo "a3-usb-gadget: no RNDIS (CONFIG_USB_CONFIGFS_RNDIS?)"
+fi
+
+# STEP 2: ACM 串口
+if mkdir -p "$G/functions/acm.usb0" 2>/dev/null; then
+    ln -sf "$G/functions/acm.usb0" "$G/configs/c.1/acm.usb0" 2>/dev/null
+    echo "a3-usb-gadget: ACM linked"
+fi
+
+UDC=$(ls /sys/class/udc 2>/dev/null | head -1)
+[ -n "$UDC" ] || { echo "a3-usb-gadget: no UDC"; exit 1; }
+echo "$UDC" > "$G/UDC" || { echo "a3-usb-gadget: UDC bind failed"; exit 1; }
+echo "a3-usb-gadget: bound to $UDC"
+exit 0
+GADGET
+chmod 0755 "$ROOT/usr/local/sbin/a3-usb-gadget"
+
+cat > "$ROOT/etc/systemd/system/a3-usb-gadget.service" <<'UNIT'
+[Unit]
+Description=OPPO A3 composite USB gadget (RNDIS network then ACM serial)
+Before=network-pre.target
+Wants=network-pre.target
+DefaultDependencies=no
+After=sysfs.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/a3-usb-gadget
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+in_root "systemctl enable a3-usb-gadget.service"
+
+say "阶段 9：网络（USB RNDIS usb0）"
 mkdir -p "$ROOT/etc/systemd/network"
 cat > "$ROOT/etc/systemd/network/10-usb0.network" <<'EOF'
 [Match]
@@ -112,13 +186,13 @@ DNS=8.8.8.8
 EOF
 in_root "systemctl enable systemd-networkd"
 
-say "阶段 9：SSH 与主机名"
+say "阶段 10：SSH 与主机名"
 in_root "systemctl enable ssh"
 echo PADT00 > "$ROOT/etc/hostname"
 sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' "$ROOT/etc/ssh/sshd_config"
 sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' "$ROOT/etc/ssh/sshd_config"
 
-say "阶段 10：桌面会话与开机服务"
+say "阶段 11：桌面会话与开机服务"
 if [ "$VARIANT" = "phosh" ]; then
     in_root "systemctl disable gdm 2>/dev/null || true"
     in_root "systemctl enable phosh.service 2>/dev/null || true"
@@ -147,7 +221,7 @@ else
     in_root "systemctl set-default multi-user.target"
 fi
 
-say "阶段 11：触摸固件（只放能驱动的设备）"
+say "阶段 12：触摸固件（只放能驱动的设备）"
 mkdir -p "$ROOT/lib/firmware/tp/17175"
 if [ -d vendor/firmware ]; then
     cp -a vendor/firmware/. "$ROOT/lib/firmware/" 2>/dev/null || true
@@ -156,7 +230,7 @@ if [ -f vendor/FW_NT36672A_JDI.bin ]; then
     cp vendor/FW_NT36672A_JDI.bin "$ROOT/lib/firmware/tp/17175/"
 fi
 
-say "阶段 12：一次性扩容服务"
+say "阶段 13：一次性扩容服务"
 cat > "$ROOT/etc/systemd/system/a3-growroot.service" <<'EOF'
 [Unit]
 Description=A3 grow root filesystem once
@@ -174,7 +248,7 @@ EOF
 touch "$ROOT/etc/a3-growroot.once"
 in_root "systemctl enable a3-growroot.service"
 
-say "阶段 13：清理"
+say "阶段 14：清理"
 in_root "apt-get clean"
 rm -rf "$ROOT/var/lib/apt/lists"/* "$ROOT/tmp"/* "$ROOT/var/tmp"/*
 rm -f "$ROOT/usr/bin/qemu-aarch64-static"
@@ -182,7 +256,7 @@ for m in run dev/pts dev proc sys; do
     mountpoint -q "$ROOT/$m" 2>/dev/null && umount -lf "$ROOT/$m" 2>/dev/null || true
 done
 
-say "阶段 14：生成 ext4 镜像（$SIZE）"
+say "阶段 15：生成 ext4 镜像（$SIZE）"
 rm -f "$OUT"
 truncate -s "$SIZE" "$OUT"
 mke2fs -t ext4 -F -d "$ROOT" -L a3-rootfs "$OUT"
