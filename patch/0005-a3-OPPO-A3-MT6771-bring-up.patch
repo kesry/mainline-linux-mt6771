@@ -1,4 +1,4 @@
-From ebfaf14798bc0c2933a4b2d56d66145de633574f Mon Sep 17 00:00:00 2001
+From 40a005385dbfee4b20186f21058be62b2df14139 Mon Sep 17 00:00:00 2001
 From: a3-port <a3@localhost>
 Date: Mon, 16 Nov 2026 22:42:39 +0800
 Subject: [PATCH 5/5] a3: OPPO A3 MT6771 bring-up
@@ -17,7 +17,7 @@ WiFi CONSYS 供电、WMAC 胶水层（厂商 btif 代码由脚本导入，不入
  arch/arm64/Kconfig                            |   49 +
  .../boot/dts/mediatek/mt6771-oppo-a3.dts      | 4831 ++++++++++++++++-
  arch/arm64/boot/dts/mediatek/mt6771.dtsi      |    4 +-
- arch/arm64/configs/a3_defconfig               |  904 +++
+ arch/arm64/configs/a3_defconfig               |  909 ++++
  arch/arm64/kernel/Makefile                    |    3 +
  arch/arm64/kernel/a3-consys-power.c           |  409 ++
  arch/arm64/kernel/a3-gpu-power.c              |  153 +
@@ -68,7 +68,7 @@ WiFi CONSYS 供电、WMAC 胶水层（厂商 btif 代码由脚本导入，不入
  drivers/usb/mtu3/mtu3_host.c                  |   18 +-
  drivers/usb/mtu3/mtu3_plat.c                  |   49 +-
  init/main.c                                   |    4 +
- 55 files changed, 9894 insertions(+), 334 deletions(-)
+ 55 files changed, 9899 insertions(+), 334 deletions(-)
  create mode 100644 arch/arm64/configs/a3_defconfig
  create mode 100644 arch/arm64/kernel/a3-consys-power.c
  create mode 100644 arch/arm64/kernel/a3-gpu-power.c
@@ -5071,10 +5071,10 @@ index c2e3e487f..845570fe8 100644
  	/*
 diff --git a/arch/arm64/configs/a3_defconfig b/arch/arm64/configs/a3_defconfig
 new file mode 100644
-index 000000000..3808c502b
+index 000000000..ae24245e3
 --- /dev/null
 +++ b/arch/arm64/configs/a3_defconfig
-@@ -0,0 +1,904 @@
+@@ -0,0 +1,909 @@
 +CONFIG_SYSVIPC=y
 +CONFIG_POSIX_MQUEUE=y
 +CONFIG_NO_HZ_IDLE=y
@@ -5253,7 +5253,9 @@ index 000000000..3808c502b
 +CONFIG_MACVLAN=y
 +CONFIG_IPVLAN=y
 +CONFIG_VXLAN=y
++CONFIG_TUN=y
 +CONFIG_VETH=y
++CONFIG_VIRTIO_NET=y
 +CONFIG_INPUT_FF_MEMLESS=y
 +CONFIG_INPUT_EVDEV=y
 +CONFIG_KEYBOARD_GPIO=y
@@ -5553,8 +5555,11 @@ index 000000000..3808c502b
 +CONFIG_TI_K3_UDMA=y
 +CONFIG_TI_K3_UDMA_GLUE_LAYER=y
 +CONFIG_VFIO=y
++CONFIG_VFIO_PLATFORM=y
 +CONFIG_VIRTIO_BALLOON=y
++CONFIG_VIRTIO_INPUT=y
 +CONFIG_VIRTIO_MMIO=y
++CONFIG_VHOST_NET=y
 +CONFIG_STAGING=y
 +CONFIG_CHROME_PLATFORMS=y
 +CONFIG_CROS_EC=y
