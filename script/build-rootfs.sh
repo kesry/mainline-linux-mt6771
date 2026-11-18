@@ -77,7 +77,8 @@ say "阶段 5：安装基础软件包"
 PKGS="systemd systemd-sysv udev kmod iproute2 iputils-ping net-tools \
       openssh-server sudo less vim-tiny procps rsync \
       util-linux mount e2fsprogs dosfstools \
-      libpam-systemd dbus"
+      libpam-systemd dbus \
+      systemd-timesyncd systemd-resolved tzdata ca-certificates"
 
 in_root "apt-get update"
 in_root "apt-get install -y --no-install-recommends $PKGS"
@@ -199,13 +200,52 @@ DNS=8.8.8.8
 EOF
 in_root "systemctl enable systemd-networkd"
 
-say "阶段 10：SSH 与主机名"
+say "阶段 10：时区、时间同步与 DNS"
+
+# 时区
+ln -sf /usr/share/zoneinfo/Asia/Shanghai "$ROOT/etc/localtime"
+echo "Asia/Shanghai" > "$ROOT/etc/timezone"
+
+# 硬件时钟用 UTC，systemd 负责同步
+in_root "systemctl enable systemd-timesyncd" || warn "timesyncd 启用失败"
+cat > "$ROOT/etc/systemd/timesyncd.conf" <<'EOF'
+[Time]
+NTP=ntp.aliyun.com ntp1.aliyun.com cn.pool.ntp.org
+FallbackNTP=0.debian.pool.ntp.org 1.debian.pool.ntp.org
+EOF
+# 允许 timesyncd 在有网后立刻校正（设备刚启动时 RTC 往往是错的）
+mkdir -p "$ROOT/etc/systemd/system/systemd-timesyncd.service.d"
+cat > "$ROOT/etc/systemd/system/systemd-timesyncd.service.d/override.conf" <<'EOF'
+[Service]
+Restart=on-failure
+RestartSec=5s
+EOF
+
+# DNS：用 systemd-resolved 统一管理，resolv.conf 指向 stub
+in_root "systemctl enable systemd-resolved" || warn "resolved 启用失败"
+mkdir -p "$ROOT/etc/systemd/resolved.conf.d"
+cat > "$ROOT/etc/systemd/resolved.conf.d/10-a3.conf" <<'EOF'
+[Resolve]
+DNS=223.5.5.5 8.8.8.8
+FallbackDNS=1.1.1.1
+Cache=yes
+EOF
+ln -sf /run/systemd/resolve/stub-resolv.conf "$ROOT/etc/resolv.conf"
+
+# networkd 不要自己覆盖 resolv.conf（两者会打架）
+mkdir -p "$ROOT/etc/systemd/networkd.conf.d"
+cat > "$ROOT/etc/systemd/networkd.conf.d/10-a3.conf" <<'EOF'
+[Network]
+ManageForeignRoutes=no
+EOF
+
+say "阶段 11：SSH 与主机名"
 in_root "systemctl enable ssh"
 echo PADT00 > "$ROOT/etc/hostname"
 sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' "$ROOT/etc/ssh/sshd_config"
 sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' "$ROOT/etc/ssh/sshd_config"
 
-say "阶段 11：桌面会话与开机服务"
+say "阶段 12：桌面会话与开机服务"
 if [ "$VARIANT" = "phosh" ]; then
     in_root "systemctl disable gdm 2>/dev/null || true"
     # phosh.service 上游写死 User=1000 + TTYPath=/dev/tty7。
@@ -242,7 +282,7 @@ else
     in_root "systemctl set-default multi-user.target"
 fi
 
-say "阶段 12：触摸固件（只放能驱动的设备）"
+say "阶段 13：触摸固件（只放能驱动的设备）"
 mkdir -p "$ROOT/lib/firmware/tp/17175"
 if [ -d vendor/firmware ]; then
     cp -a vendor/firmware/. "$ROOT/lib/firmware/" 2>/dev/null || true
@@ -251,7 +291,7 @@ if [ -f vendor/FW_NT36672A_JDI.bin ]; then
     cp vendor/FW_NT36672A_JDI.bin "$ROOT/lib/firmware/tp/17175/"
 fi
 
-say "阶段 13：一次性扩容服务"
+say "阶段 14：一次性扩容服务"
 cat > "$ROOT/etc/systemd/system/a3-growroot.service" <<'EOF'
 [Unit]
 Description=A3 grow root filesystem once
@@ -269,7 +309,7 @@ EOF
 touch "$ROOT/etc/a3-growroot.once"
 in_root "systemctl enable a3-growroot.service"
 
-say "阶段 14：清理"
+say "阶段 15：清理"
 in_root "apt-get clean"
 rm -rf "$ROOT/var/lib/apt/lists"/* "$ROOT/tmp"/* "$ROOT/var/tmp"/*
 rm -f "$ROOT/usr/bin/qemu-aarch64-static"
@@ -277,7 +317,7 @@ for m in run dev/pts dev proc sys; do
     mountpoint -q "$ROOT/$m" 2>/dev/null && umount -lf "$ROOT/$m" 2>/dev/null || true
 done
 
-say "阶段 15：生成 ext4 镜像（$SIZE）"
+say "阶段 16：生成 ext4 镜像（$SIZE）"
 rm -f "$OUT"
 truncate -s "$SIZE" "$OUT"
 mke2fs -t ext4 -F -d "$ROOT" -L a3-rootfs "$OUT"

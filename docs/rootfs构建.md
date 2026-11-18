@@ -146,3 +146,59 @@ dd if=/dev/mmcblk0p44 bs=4M | gzip -1 > /root/rootfs-backup.img.gz
 ```
 
 备份产物很大（实际占用 4~5 GB），只在需要时做，不要放进仓库。
+
+## 10. 时间与 DNS
+
+早期镜像漏了这两块，表现为时间停在 RTC 的旧值、`systemd-resolved` 未启用。
+
+### 10.1 时区与时间同步
+
+```
+时区        Asia/Shanghai（/etc/localtime 软链 + /etc/timezone）
+时间同步    systemd-timesyncd，开机自动启用
+NTP 服务器  ntp.aliyun.com ntp1.aliyun.com cn.pool.ntp.org
+            回退 0/1.debian.pool.ntp.org
+```
+
+设备 RTC 在冷启动时往往是错的（实测停在几个月前），所以 timesyncd 必须
+在**有网之后自动校正**。配置里加了 `Restart=on-failure`，网络晚到时会重试。
+
+验证：
+
+```sh
+timedatectl
+# 应看到 System clock synchronized: yes
+date
+```
+
+### 10.2 DNS
+
+用 `systemd-resolved` 统一管理，而不是让 `systemd-networkd` 单独写
+`resolv.conf`（两者会互相覆盖）：
+
+```
+/etc/systemd/resolved.conf.d/10-a3.conf
+    DNS=223.5.5.5 8.8.8.8
+    FallbackDNS=1.1.1.1
+    Cache=yes
+
+/etc/resolv.conf  →  软链到 /run/systemd/resolve/stub-resolv.conf
+```
+
+`10-usb0.network` 里的 `DNS=` 仍保留，作为 resolved 的 per-link 来源。
+
+验证：
+
+```sh
+resolvectl status | head -20
+getent hosts mirrors.ustc.edu.cn
+```
+
+### 10.3 基础包补全
+
+```
+systemd-timesyncd    时间同步
+systemd-resolved     DNS 解析
+tzdata               时区数据
+ca-certificates      HTTPS 证书（apt 用 https 源时需要）
+```
