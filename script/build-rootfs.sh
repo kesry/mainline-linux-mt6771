@@ -295,6 +295,53 @@ else
     in_root "systemctl set-default multi-user.target"
 fi
 
+say "阶段 12.5：创建 /dev/block/by-name（Android 风格分区别名）"
+
+# /dev/block/by-name 是 Android 的布局，主线内核 + udev 不会建它。
+# 很多 Android 移植的脚本、刷机工具、fstab 都按这个名字找分区，
+# 缺了会报 "No such file or directory"。
+# 用 udev 规则从 PARTNAME 生成同样内容的软链。
+mkdir -p "$ROOT/etc/udev/rules.d"
+cat > "$ROOT/etc/udev/rules.d/60-a3-block-by-name.rules" <<'UDEV'
+# 为每个有分区名的块设备创建 /dev/block/by-name/<PARTNAME>
+SUBSYSTEM=="block", ENV{DEVTYPE}=="partition", ENV{PARTNAME}!="", \
+  SYMLINK+="block/by-name/$env{PARTNAME}"
+UDEV
+
+# 开机时也重建一次，避免 udev 早于分区扫描
+cat > "$ROOT/usr/local/sbin/a3-block-by-name" <<'SCRIPT'
+#!/bin/sh
+# 兜底：udev 偶尔不会给已有分区重新发事件，这里按 sysfs 补一遍。
+mkdir -p /dev/block/by-name
+for d in /sys/class/block/*; do
+    [ -r "$d/partition" ] || continue
+    name=$(cat "$d/uevent" 2>/dev/null | sed -n 's/^PARTNAME=//p')
+    [ -n "$name" ] || continue
+    dev=/dev/$(basename "$d")
+    [ -e "$dev" ] || continue
+    ln -sf "../../$(basename "$d")" "/dev/block/by-name/$name"
+done
+exit 0
+SCRIPT
+chmod 0755 "$ROOT/usr/local/sbin/a3-block-by-name"
+
+cat > "$ROOT/etc/systemd/system/a3-block-by-name.service" <<'UNIT'
+[Unit]
+Description=Create /dev/block/by-name symlinks (Android layout)
+DefaultDependencies=no
+After=systemd-udev-settle.service local-fs.target
+Wants=systemd-udev-settle.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/a3-block-by-name
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+in_root "systemctl enable a3-block-by-name.service" || warn "a3-block-by-name 启用失败"
+
 say "阶段 13：触摸固件（只放能驱动的设备）"
 mkdir -p "$ROOT/lib/firmware/tp/17175"
 if [ -d vendor/firmware ]; then

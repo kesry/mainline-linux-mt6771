@@ -223,3 +223,56 @@ PVE / pct            依赖正反向解析，直接起不来
 
 `127.0.1.1` 那一行把主机名和 FQDN 绑在一起，`hostname -f` 才能返回
 `oppoa3.pve`（而不是只返回 `PADT00`）。
+
+## 11. /dev/block/by-name（Android 风格分区别名）
+
+`/dev/block/by-name` 是 **Android 的布局**，由 Android 的 `ueventd` 根据分区表的
+`PARTNAME` 创建。主线内核 + udev **不会**自动建它，`CONFIG_UEVENT_HELPER` 也没开。
+
+很多 Android 移植场景会按这个名字找分区（刷机脚本、fstab、备份工具），
+缺了就报 `No such file or directory`。
+
+### 11.1 内核侧的等价物
+
+主线 udev 已经生成 `/dev/disk/by-partlabel/`，内容完全一样：
+
+```sh
+ls /dev/disk/by-partlabel/          # 46 个条目
+ls -l /dev/disk/by-partlabel/boot   # -> ../../mmcblk0p35
+```
+
+所以如果只是自己用，`/dev/disk/by-partlabel/boot` 就够了。
+
+### 11.2 兼容 Android 约定
+
+需要 `/dev/block/by-name/` 时，构建脚本会写入 udev 规则：
+
+```
+/etc/udev/rules.d/60-a3-block-by-name.rules
+SUBSYSTEM=="block", ENV{DEVTYPE}=="partition", ENV{PARTNAME}!="", \
+  SYMLINK+="block/by-name/$env{PARTNAME}"
+```
+
+外加一个兜底服务 `a3-block-by-name.service`：udev 偶尔不会给已有分区补发事件，
+这个服务按 `sysfs` 的 `PARTNAME` 再扫一遍。
+
+### 11.3 验证
+
+```sh
+ls /dev/block/by-name/ | wc -l        # 应为 46
+readlink -f /dev/block/by-name/boot   # /dev/mmcblk0p35
+dd if=/dev/block/by-name/boot bs=8 count=1 | od -c   # 应看到 ANDROID!
+```
+
+### 11.4 写 udev 规则时的坑
+
+用 shell heredoc 写这条规则会被**提前变量替换**：
+
+```sh
+cat > rule <<'EOF'
+SYMLINK+="block/by-name/$env{PARTNAME}"     # 单引号 EOF 才能保留 $
+EOF
+```
+
+在 PowerShell 里更要注意：`$env{PARTNAME}` 会被 PowerShell 当成自己的变量吃掉，
+变成 `_PARTNAME_` 这种字面量。用 base64 传输或单引号 here-string 避免。
