@@ -202,3 +202,24 @@ systemd-resolved     DNS 解析
 tzdata               时区数据
 ca-certificates      HTTPS 证书（apt 用 https 源时需要）
 ```
+
+### 10.4 /etc/hosts 必须自己写
+
+`debootstrap --variant=minbase` **不会生成 `/etc/hosts`**。缺了它会有这些症状：
+
+```
+hostname -f          解析不到 FQDN
+sudo                 报 "unable to resolve host PADT00"（每次执行都慢一下）
+PVE / pct            依赖正反向解析，直接起不来
+```
+
+构建时写入：
+
+```
+127.0.0.1       localhost.localdomain localhost
+127.0.1.1       PADT00 oppoa3.pve
+::1             localhost.localdomain localhost ip6-localhost ip6-loopback
+```
+
+`127.0.1.1` 那一行把主机名和 FQDN 绑在一起，`hostname -f` 才能返回
+`oppoa3.pve`（而不是只返回 `PADT00`）。

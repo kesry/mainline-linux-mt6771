@@ -242,6 +242,19 @@ EOF
 say "阶段 11：SSH 与主机名"
 in_root "systemctl enable ssh"
 echo PADT00 > "$ROOT/etc/hostname"
+
+# /etc/hosts 必须自己写：debootstrap 的 minbase 不生成它，
+# 缺了会导致 hostname -f 解析不到 FQDN、sudo 报
+# "unable to resolve host"、PVE 等依赖正反向解析的服务起不来。
+cat > "$ROOT/etc/hosts" <<'HOSTS'
+127.0.0.1       localhost.localdomain localhost
+127.0.1.1       PADT00 oppoa3.pve
+::1             localhost.localdomain localhost ip6-localhost ip6-loopback
+
+ff02::1         ip6-allnodes
+ff02::2         ip6-allrouters
+HOSTS
+chmod 0644 "$ROOT/etc/hosts"
 sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' "$ROOT/etc/ssh/sshd_config"
 sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' "$ROOT/etc/ssh/sshd_config"
 
