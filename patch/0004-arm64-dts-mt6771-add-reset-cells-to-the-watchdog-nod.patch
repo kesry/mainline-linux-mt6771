@@ -1,7 +1,7 @@
 From ef5ecfd3ec858a14abe45ca098ce5941d61b3a8c Mon Sep 17 00:00:00 2001
 From: oppoa3-port <port@oppoa3.local>
 Date: Wed, 4 Nov 2026 20:24:32 +0800
-Subject: [PATCH 4/5] arm64: dts: mt6771: add #reset-cells to the watchdog node
+Subject: [PATCH 4/6] arm64: dts: mt6771: add #reset-cells to the watchdog node
 
 mtk_wdt_probe() calls toprgu_register_reset_controller() and returns its
 error. devm_reset_controller_register() needs #reset-cells in the node, so

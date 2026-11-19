@@ -1,7 +1,7 @@
 From 40a005385dbfee4b20186f21058be62b2df14139 Mon Sep 17 00:00:00 2001
 From: a3-port <a3@localhost>
 Date: Mon, 16 Nov 2026 22:42:39 +0800
-Subject: [PATCH 5/5] a3: OPPO A3 MT6771 bring-up
+Subject: [PATCH 5/6] a3: OPPO A3 MT6771 bring-up
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit

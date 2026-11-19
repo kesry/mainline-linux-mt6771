@@ -32,7 +32,8 @@ say "0/6 前置检查"
 
 [[ -f $OUT/arch/arm64/boot/Image ]]   || die "找不到 $OUT/arch/arm64/boot/Image，先编内核"
 [[ -f $OUT/System.map ]]              || die "找不到 System.map（mk104 需要它定位 primary_entry）"
-[[ -f $IMG/a3-empty.cpio.gz ]]        || die "找不到 a3-empty.cpio.gz（必须用空 ramdisk，让内核按 root=PARTUUID 直接挂载 userdata）"
+RAMDISK="${A3_RAMDISK:-$IMG/a3-empty.cpio.gz}"
+[[ -f "$RAMDISK" ]] || die "找不到 ramdisk: $RAMDISK"
 [[ -f $IMG/a3-v186-good.dtb ]]        || die "找不到 a3-v186-good.dtb"
 [[ -f $IMG/stock-boot-orig.img ]]     || die "找不到 stock-boot-orig.img（要从中嫁接 AVB）"
 [[ -f ${A3_SCRIPTS:-$A3/script}/a3-prep-kernel.py ]]        || die "找不到 a3-prep-kernel.py"
@@ -87,7 +88,7 @@ say "3/6 组装 boot.img（空 ramdisk + v186 DTB + AVB 嫁接）"
 TARGET="$IMG/$NAME.img"
 python3 "${A3_SCRIPTS:-$A3/script}/mkbootimg-a3.py" \
     --kernel   /tmp/a3_k2.gz \
-    --ramdisk  "$IMG/a3-empty.cpio.gz" \
+    --ramdisk  "$RAMDISK" \
     --dtb      "${A3_DTB:-$IMG/a3-v186-good.dtb}" \
     --stock-vbmeta "$IMG/stock-boot-orig.img" \
     --output   "$TARGET" | sed 's/^/  /'
@@ -113,7 +114,12 @@ def chk(cond, msg):
 
 chk(ps == 2048,                "page_size == 2048")
 chk(d[ps] == 0x1f and d[ps+1] == 0x8b, "kernel 段是 gzip")
-chk(rs < 4096,                 "ramdisk 是空的（%d B，不抢 root=）" % rs)
+import os
+_allow_big = os.environ.get("A3_RAMDISK") is not None
+if _allow_big:
+    chk(rs > 0, "ramdisk 非空（%d B，自定义 rescue initramfs）" % rs)
+else:
+    chk(rs < 4096, "ramdisk 是空的（%d B，不抢 root=）" % rs)
 chk(dsz > 100000,              "dtb_size 合理（%d）" % dsz)
 
 # AVB 结构：AVB0 紧跟在 kernel 段之后（不在文件末尾），AVBf 在最后 64B

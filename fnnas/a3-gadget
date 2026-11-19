@@ -1,0 +1,46 @@
+#!/bin/sh
+# a3-gadget — OPPO A3 USB gadget: RNDIS 网络 + ACM 串口
+# 由 a3-gadget.service 开机调用。
+#
+# 顺序关键：网络功能必须先建，再建串口；否则主机重枚举时串口会掉。
+# 不设 bDeviceClass（复合设备保持在接口层定义）。
+
+set -u
+
+G=/sys/kernel/config/usb_gadget/a3
+mountpoint -q /sys/kernel/config || mount -t configfs none /sys/kernel/config 2>/dev/null
+[ -d /sys/kernel/config/usb_gadget ] || exit 0
+
+# 已绑定则跳过（幂等）
+[ -e "$G/UDC" ] && [ -s "$G/UDC" ] && exit 0
+
+mkdir -p "$G" 2>/dev/null
+echo 0x1d6b > "$G/idVendor"      # Linux Foundation
+echo 0x0104 > "$G/idProduct"     # Multifunction Composite
+echo 0x0200 > "$G/bcdUSB"
+echo 0x0100 > "$G/bcdDevice"
+
+mkdir -p "$G/strings/0x409" 2>/dev/null
+echo PADT00 > "$G/strings/0x409/serialnumber"
+echo OPPO   > "$G/strings/0x409/manufacturer"
+echo "A3 fnNAS" > "$G/strings/0x409/product"
+
+mkdir -p "$G/configs/c.1/strings/0x409" 2>/dev/null
+echo "RNDIS+ACM" > "$G/configs/c.1/strings/0x409/configuration"
+echo 120 > "$G/configs/c.1/MaxPower" 2>/dev/null
+
+# STEP 1: 网络（RNDIS）先建
+mkdir -p "$G/functions/rndis.usb0" 2>/dev/null
+echo "02:00:a3:00:00:01" > "$G/functions/rndis.usb0/host_addr" 2>/dev/null
+echo "02:00:a3:00:00:02" > "$G/functions/rndis.usb0/dev_addr"  2>/dev/null
+ln -sf "$G/functions/rndis.usb0" "$G/configs/c.1/rndis.usb0" 2>/dev/null
+
+# STEP 2: 串口（ACM）后建
+mkdir -p "$G/functions/acm.usb0" 2>/dev/null
+ln -sf "$G/functions/acm.usb0" "$G/configs/c.1/acm.usb0" 2>/dev/null
+
+# 绑定 UDC
+UDC=$(ls /sys/class/udc 2>/dev/null | head -1)
+[ -n "$UDC" ] && echo "$UDC" > "$G/UDC" 2>/dev/null
+
+exit 0

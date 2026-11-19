@@ -1,7 +1,7 @@
 From 39159b92796242aa1807ba034de1ae17512e08a7 Mon Sep 17 00:00:00 2001
 From: oppoa3-port <port@oppoa3.local>
 Date: Wed, 4 Nov 2026 01:18:58 +0800
-Subject: [PATCH 3/5] arm64: dts: mt6771: add DTBO stub symbols so LK can apply
+Subject: [PATCH 3/6] arm64: dts: mt6771: add DTBO stub symbols so LK can apply
  the vendor overlay
 
 ROOT CAUSE of the kernel never starting.
