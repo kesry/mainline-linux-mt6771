@@ -125,7 +125,97 @@ data     (p47) 90G  裸盘，飞牛 WebUI 初始化
 重建 userdata 分区时必须 `-u 6FCE83A6-5273-4748-1145-C205EBB4B8AD`，
 否则 `root=PARTUUID` 失效、系统起不来。
 
-## 6. 已知限制
+## 6. 主线内核兼容补丁（存储池能不能用的关键）
+
+飞牛存储池依赖两个**私有内核特性**，上游主线没有，导致存储池建不起来或挂不上。
+本脚本注入 `a3-fnnas-fixes.service`，**每次开机重新应用**（防止被系统更新覆盖）。
+
+### 6.1 mdadm wrapper：`--bitmap=lockless` → `--bitmap=internal`
+
+飞牛创建存储池时硬编码：
+
+```
+mdadm --create /dev/md0 --metadata=1.2 --run --force --level=1 \
+      --raid-devices=1 --bitmap=lockless /dev/mmcblk0pXX
+```
+
+`lockless` write-intent bitmap 需要内核 `ll_bitmap` sysfs 属性，这是飞牛 6.18
+私有补丁（实测飞牛 `md-mod.ko` 里有 `ll_bitmap`，上游 6.12/6.14/master 都没有）。
+后果：
+
+| mdadm 版本 | 行为 |
+|---|---|
+| 4.5 / 4.6（新） | 调 `sysfs_set_llbitmap()` 失败 → 阵列建不起来，留下空壳 md0 → 后续重试全因 EEXIST 失败 |
+| 4.2（老） | 不认识该参数 → 直接拒绝 |
+
+**两种都失败。** wrapper 把参数换成 `internal`：单盘 RAID1 上功能等效
+（都是 write-intent bitmap，只是加锁粒度不同），飞牛存储池功能不受影响。
+
+### 6.2 mount wrapper：过滤 `trimacl`
+
+飞牛挂载存储池时带私有参数：
+
+```
+mount -t ext4 -o trimacl,prjquota /dev/dm-0 /vol00
+```
+
+`trimacl` 是飞牛 `CONFIG_FS_TRIM_ACL` 私有补丁（Windows ACL 机制，用于回收站和
+多用户文件权限）。主线内核报 `ext4: Unknown parameter 'trimacl'` 并拒绝挂载。
+
+wrapper 只过滤 `trimacl`，保留 `prjquota` 等标准参数。
+
+> 代价：飞牛的**文件回收站**和**多用户文件权限管理**不可用（社区 issue #640 已确认
+> 这两个功能依赖 FilesACL 内核模块）。基本存储、共享、Docker 不受影响。
+
+### 6.3 固定 `/etc/resolv.conf`
+
+`/etc/resolv.conf` 若没有 `nameserver` 行，pgbouncer 启动时报
+`evdns_base_new failed` 然后 **SEGV 崩溃**，连锁导致：
+
+```
+pgbouncer 崩 → /run/pgbouncer/.s.PGSQL.6432 消失
+  → cloud_storage_dav / ai_manager 连不上数据库
+  → 存储池无法登记、无法挂载
+  → 飞牛 Web 全挂
+```
+
+脚本固定写入 DNS 并在 NetworkManager 里设 `dns=none`，防止被覆盖。
+
+### 6.4 内核需要的内核配置
+
+除第 1 节外，存储栈还需要：
+
+```
+CONFIG_QUOTA=y
+CONFIG_QFMT_V1=y
+CONFIG_QFMT_V2=y          # 缺这个 ext4 带 quota 特性时拒绝挂载
+CONFIG_QUOTA_TREE=y
+CONFIG_QUOTACTL=y
+CONFIG_BLK_DEV_DM=y + DM_*   # LVM
+CONFIG_MD=y + MD_RAID1=y
+CONFIG_BTRFS_FS=y
+```
+
+**踩坑**：飞牛格式化 ext4 时会启用 `quota` 特性，若内核缺 `CONFIG_QFMT_V2`，
+挂载报 `EXT4-fs (dm-0): The kernel was not built with CONFIG_QUOTA and CONFIG_QFMT_V2`。
+
+## 7. 存储池创建的完整链路
+
+飞牛建存储池的步骤（缺任何一环都会停住）：
+
+```
+1. mdadm --create      → 建 RAID1（受 6.1 lockless 影响）
+2. pvcreate /dev/md0   → LVM 物理卷
+3. vgcreate trim_<uuid> → 卷组
+4. lvcreate -l +100%FREE -n 0  → 逻辑卷
+5. mkfs.ext4（或 btrfs）       → 格式化
+6. mount -o trimacl,...        → 挂载（受 6.2 trimacl 影响）
+7. 写数据库登记                 → 受 6.3 pgbouncer 影响
+```
+
+排查时逐条手工跑一遍，就能定位卡在哪一步。
+
+## 8. 已知限制
 
 - 飞牛存储管理对 mmcblk 分区的支持有限：需要分区带 `msftdata` 标志
   （跟 otp 分区一样），否则 WebUI 扫描不到

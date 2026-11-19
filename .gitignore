@@ -9,3 +9,4 @@
 # Python 缓存
 __pycache__/
 *.pyc
+fnnas/ld-hooks/*.so

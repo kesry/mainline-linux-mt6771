@@ -5,12 +5,13 @@
 #   build-rootfs.sh        → debootstrap 出来的 Debian 13 最小/桌面 rootfs
 #   build-rootfs-fnnas.sh  → 从飞牛官方 ARM ISO 的 trimfs.tgz 提取的飞牛 rootfs
 #
-# 本脚本做四件事：
+# 本脚本做六件事：
 #   1. 从 trimfs.tgz 解出飞牛 rootfs
 #   2. 注入 LD 拦截库（nodri/nodmaheap，软解媒体服务需要）
 #   3. 注入 USB gadget（RNDIS 网络 + ACM 串口）—— 非 UEFI 设备必须自己建
 #   4. 替换 mediasrv 为软解版（飞牛原版依赖 RK MPP，MT6771 上必崩）
-#   5. 打包成 ext4 镜像（用 loop 挂载 + 限速解压，避免构建机 OOM）
+#   5. 注入主线内核兼容补丁（mdadm lockless / mount trimacl / 固定 DNS）
+#   6. 打包成 ext4 镜像（用 loop 挂载 + 限速解压，避免构建机 OOM）
 #
 # 前置条件：
 #   - 构建机有 7z（p7zip-full）、parted/e2fsprogs、aarch64 交叉编译器
@@ -152,9 +153,125 @@ UNIT
 say "  软解 mediasrv 已安装，socket ACL drop-in 已配置"
 
 # ------------------------------------------------------------
-# 5. 改 fstab + 打包 ext4 镜像
+# 5. 注入主线内核兼容补丁（绕开飞牛私有内核特性）
 # ------------------------------------------------------------
-say "=== 5/5 配置 fstab 并打包镜像 ==="
+say "=== 5/6 注入主线内核兼容补丁 ==="
+
+# --- 5.1 mdadm wrapper: --bitmap=lockless -> --bitmap=internal ---
+# lockless write-intent bitmap 是飞牛私有内核补丁（ll_bitmap sysfs 属性），
+# 上游主线 6.12/6.14/master 均无此实现。飞牛硬编码传该参数，
+# mdadm 4.6 会调 sysfs_set_llbitmap() 失败 -> 阵列建不起来。
+# internal bitmap 在单盘 RAID1 上功能等效。
+mkdir -p "$ROOT/usr/local/sbin"
+cat > "$ROOT/usr/local/sbin/mdadm-a3-wrapper" <<'MDADM_WRAPPER'
+#!/bin/sh
+REAL=/usr/sbin/mdadm.real
+[ ! -x "$REAL" ] && { echo "mdadm wrapper: $REAL not found" >&2; exit 127; }
+[ $# -eq 0 ] && exec "$REAL"
+n=$#
+i=1
+while [ $i -le $n ]; do
+    eval "arg=\${$i}"
+    case "$arg" in
+        --bitmap=lockless) set -- "$@" --bitmap=internal ;;
+        *) set -- "$@" "$arg" ;;
+    esac
+    i=$((i + 1))
+done
+shift $n
+exec "$REAL" "$@"
+MDADM_WRAPPER
+chmod 755 "$ROOT/usr/local/sbin/mdadm-a3-wrapper"
+
+# 开机把它装成 /usr/sbin/mdadm（系统更新会覆盖，所以每次启动都重装）
+cat > "$ROOT/usr/local/sbin/a3-fnnas-fixes" <<'FIXES'
+#!/bin/sh
+# 主线内核兼容修复：每次启动重新应用，防止被系统更新覆盖
+
+# 1. mdadm wrapper
+if [ -x /usr/sbin/mdadm ] && ! head -1 /usr/sbin/mdadm 2>/dev/null | grep -q '^#!'; then
+    cp -f /usr/sbin/mdadm /usr/sbin/mdadm.real
+    cp -f /usr/local/sbin/mdadm-a3-wrapper /usr/sbin/mdadm
+    chmod 755 /usr/sbin/mdadm /usr/sbin/mdadm.real
+fi
+
+# 2. mount wrapper：过滤飞牛私有的 trimacl 参数
+#    trimacl 是飞牛 CONFIG_FS_TRIM_ACL 私有补丁，主线内核不认，会拒绝挂载
+if [ ! -e /usr/bin/mount.orig ]; then
+    mv /usr/bin/mount /usr/bin/mount.orig
+    cat > /usr/bin/mount <<'MW'
+#!/bin/bash
+ARGS=()
+while (($#)); do
+    if [[ "$1" == "-o" && $# -ge 2 ]]; then
+        options="$2"; shift 2
+        filtered=()
+        IFS=',' read -ra items <<< "$options"
+        for item in "${items[@]}"; do
+            [[ "$item" != "trimacl" ]] && filtered+=("$item")
+        done
+        ((${#filtered[@]})) && ARGS+=("-o" "$(IFS=,; echo "${filtered[*]}")")
+    else
+        ARGS+=("$1"); shift
+    fi
+done
+exec /usr/bin/mount.orig "${ARGS[@]}"
+MW
+    chmod 755 /usr/bin/mount
+fi
+
+# 3. 固定 DNS（空 resolv.conf 会让 pgbouncer evdns_base_new 失败并 SEGV）
+if ! grep -q '^nameserver' /etc/resolv.conf 2>/dev/null; then
+    rm -f /etc/resolv.conf
+    cat > /etc/resolv.conf <<'DNS'
+nameserver 223.5.5.5
+nameserver 8.8.8.8
+nameserver 10.42.1.1
+DNS
+    chmod 644 /etc/resolv.conf
+fi
+exit 0
+FIXES
+chmod 755 "$ROOT/usr/local/sbin/a3-fnnas-fixes"
+
+cat > "$ROOT/etc/systemd/system/a3-fnnas-fixes.service" <<'UNIT'
+[Unit]
+Description=A3 fnNAS mainline-kernel compatibility fixes
+DefaultDependencies=no
+After=local-fs.target
+Before=postgresql.service pgbouncer.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/a3-fnnas-fixes
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+mkdir -p "$ROOT/etc/systemd/system/multi-user.target.wants"
+ln -sf /etc/systemd/system/a3-fnnas-fixes.service \
+    "$ROOT/etc/systemd/system/multi-user.target.wants/a3-fnnas-fixes.service"
+
+# --- 5.4 固定 DNS + 禁止 NetworkManager 覆盖 ---
+rm -f "$ROOT/etc/resolv.conf"
+cat > "$ROOT/etc/resolv.conf" <<'DNS'
+nameserver 223.5.5.5
+nameserver 8.8.8.8
+nameserver 10.42.1.1
+DNS
+chmod 644 "$ROOT/etc/resolv.conf"
+mkdir -p "$ROOT/etc/NetworkManager/conf.d"
+cat > "$ROOT/etc/NetworkManager/conf.d/99-no-dns.conf" <<'NMCONF'
+[main]
+dns=none
+NMCONF
+say "  mdadm/mount wrapper、DNS 固定、启动自修复服务 已注入"
+
+# ------------------------------------------------------------
+# 6. 改 fstab + 打包 ext4 镜像
+# ------------------------------------------------------------
+say "=== 6/6 配置 fstab 并打包镜像 ==="
 # 根分区用 PARTUUID；data 分区绝不写进 fstab（留给飞牛 WebUI 初始化成存储池）
 cat > "$ROOT/etc/fstab" <<EOF
 # OPPO A3 主线内核 + 飞牛 rootfs
