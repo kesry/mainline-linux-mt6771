@@ -19,3 +19,7 @@ fnnas/kmod/*.mod.c
 fnnas/kmod/*.mod.o
 fnnas/kmod/Module.symvers
 fnnas/kmod/modules.order
+
+# kmod 编译中间文件
+fnnas/kmod/.*.cmd
+fnnas/kmod/..module-common.o.cmd
