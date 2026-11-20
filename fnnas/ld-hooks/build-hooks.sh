@@ -5,6 +5,7 @@
 #   nodri.so       —— 屏蔽 /dev/dri（我们没有 DRI/GPU 渲染节点）
 #   nodmaheap.so   —— 屏蔽 /dev/dma_heap（MT6771 无 dma-buf heap）
 #   fakecompat.so  —— 伪造 /proc/device-tree/compatible（可选，软解方案一般不用）
+#   fnacl_faccessat_hook.so —— 兼容飞牛私有 syscall：伪 dirfd(-21586) + struct 指针的 faccessat
 #
 # 关于 fakecompat：
 #   原项目用它把 SoC 伪装成 rk3588 让 MPP 硬件编解码初始化。
@@ -22,7 +23,7 @@ cd "$(dirname "$0")"
 echo "=== 编译器: $CC ==="
 $CC --version | head -1
 
-for src in nodri nodmaheap fakecompat; do
+for src in nodri nodmaheap fakecompat fnacl_faccessat_hook; do
     echo "=== 编译 $src.so ==="
     $CC -shared -fPIC -O2 -o "${src}.so" "${src}.c" -ldl
 done

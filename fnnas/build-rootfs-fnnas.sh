@@ -77,6 +77,51 @@ install -m 0755 "$SCRIPT_DIR/ld-hooks/nodri.so"     "$ROOT/opt/fnnas/hook/"
 install -m 0755 "$SCRIPT_DIR/ld-hooks/nodmaheap.so" "$ROOT/opt/fnnas/hook/"
 # fakecompat 可选，默认也放进去但不注入（见 README）
 install -m 0755 "$SCRIPT_DIR/ld-hooks/fakecompat.so" "$ROOT/opt/fnnas/hook/" 2>/dev/null || true
+
+# --- 2.1 飞牛私有 syscall 兼容 hook（伪 dirfd faccessat）---
+# 飞牛 libnperm 用 faccessat(-21586, struct_ptr, R/W_OK, 0) 做权限判定：
+#   飞牛内核会解引用 struct 取真实路径；主线内核把 struct 当路径 -> EBADF,
+#   后果是音乐/影视授权报"所选文件夹无写入权限"。
+# 本 hook 在用户态解引用 struct 并转为标准 AT_FDCWD 调用，已在实机验证有效。
+install -m 0755 "$SCRIPT_DIR/ld-hooks/fnacl_faccessat_hook.so" \
+    "$ROOT/opt/fnnas/fnacl_faccessat_hook.so"
+
+# 给所有链接了 libnperm 的服务注入 LD_PRELOAD（开机生效）。
+# 用 a3-fnperm.service 一次性生成 drop-in，避免依赖具体服务列表硬编码。
+cat > "$ROOT/usr/local/sbin/a3-fnperm-hook-setup" <<'FNPERM'
+#!/bin/sh
+# 为所有链接 libnperm 的飞牛服务生成 LD_PRELOAD drop-in
+HOOK=/opt/fnnas/fnacl_faccessat_hook.so
+[ -f "$HOOK" ] || exit 0
+for unit in /usr/trim/bin/*; do
+    [ -f "$unit" ] && [ -x "$unit" ] || continue
+    readelf -d "$unit" 2>/dev/null | grep -q libnperm || continue
+    name=$(basename "$unit")
+    d="/etc/systemd/system/${name}.service.d"
+    mkdir -p "$d"
+    cat > "$d/a3-fnacl.conf" <<EOF
+[Service]
+Environment="LD_PRELOAD=$HOOK"
+EOF
+done
+FNPERM
+chmod 755 "$ROOT/usr/local/sbin/a3-fnperm-hook-setup"
+
+# 把这个 setup 挂到已有的 a3-fnnas-fixes.service 里（它在 early boot 跑）
+# 在 fixes 脚本开头增加调用（幂等）
+python3 - "$ROOT/usr/local/sbin/a3-fnnas-fixes" <<'PY2'
+import sys
+p=sys.argv[1]
+s=open(p).read()
+line='/usr/local/sbin/a3-fnperm-hook-setup 2>/dev/null || true'
+if line not in s:
+    marker='# 1. mdadm wrapper'
+    s=s.replace(marker, line+'
+
+'+marker, 1)
+    open(p,'w').write(s)
+PY2
+
 say "  hook 库已安装到 /opt/fnnas/hook/"
 
 # ------------------------------------------------------------
@@ -239,7 +284,7 @@ cat > "$ROOT/etc/systemd/system/a3-fnnas-fixes.service" <<'UNIT'
 Description=A3 fnNAS mainline-kernel compatibility fixes
 DefaultDependencies=no
 After=local-fs.target
-Before=postgresql.service pgbouncer.service
+Before=postgresql.service pgbouncer.service trim_main.service filestor_service.service trim_app_center.service
 
 [Service]
 Type=oneshot

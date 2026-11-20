@@ -181,6 +181,33 @@ pgbouncer 崩 → /run/pgbouncer/.s.PGSQL.6432 消失
 
 脚本固定写入 DNS 并在 NetworkManager 里设 `dns=none`，防止被覆盖。
 
+### 6.5 飞牛私有 syscall：`system.trim_acl` 与伪 dirfd（音乐/影视授权的关键）
+
+飞牛 `CONFIG_FS_TRIM_ACL` 是私有 VFS 补丁，主线内核没有。它有两层：
+
+1. **xattr：`system.trim_acl`**
+   - 飞牛 libtrimacl 通过标准 `getxattr/setxattr("system.trim_acl")` 读写 ACL。
+   - 主线内核无此 handler → 返回 `EOPNOTSUPP(95)` → 判定"无写入权限"。
+   - 解决：`fnnas/kmod/trim_acl_shim.ko`（内核模块）替换 sb->s_xattr，
+     注册精确匹配 `system.trim_acl` 的 handler，读写转发到 `user.trim_acl`。
+     关键：xattr_handler 必须用 `.name` 精确匹配、`.prefix=NULL`，否则
+     `xattr_resolve_name()` 会返回 EINVAL（见源码注释）。
+
+2. **权限判定：伪 dirfd `faccessat`**
+   - 飞牛 `libnperm.so` 用 `faccessat(-21586, struct_ptr, R_OK|W_OK, 0)` 判定权限。
+     飞牛内核会解引用 struct 取真实路径；主线内核把 struct 当路径串 → EBADF。
+   - 解决：`fnnas/ld-hooks/fnacl_faccessat_hook.so`（LD_PRELOAD）
+     拦截 faccessat，识别伪 dirfd（-21586..-21575），解引用 struct 首字段
+     取真实路径，转成标准 `AT_FDCWD` 调用。
+   - 构建脚本通过 `a3-fnperm-hook-setup` 给所有链接 libnperm 的飞牛服务
+     自动生成 systemd drop-in 注入（开机生效）。
+
+> 实机验证（2026-11-20）：加这两层后，飞牛音乐"添加音乐库/文件夹授权"
+> 从"所选文件夹无写入权限"变为成功。
+
+> 注意：**不要手工启动飞牛的应用**（如 trim-music）。必须由 app-center
+> 自己拉起，否则应用缺少 `TRIM_API_TOKEN`，会报 `authed-dir/list` 未知错误。
+
 ### 6.4 内核需要的内核配置
 
 除第 1 节外，存储栈还需要：

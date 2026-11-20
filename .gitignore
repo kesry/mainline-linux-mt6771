@@ -10,3 +10,12 @@
 __pycache__/
 *.pyc
 fnnas/ld-hooks/*.so
+
+# fnnas 内核模块编译产物
+fnnas/kmod/*.ko
+fnnas/kmod/*.o
+fnnas/kmod/*.mod
+fnnas/kmod/*.mod.c
+fnnas/kmod/*.mod.o
+fnnas/kmod/Module.symvers
+fnnas/kmod/modules.order
