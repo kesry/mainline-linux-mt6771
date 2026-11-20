@@ -97,7 +97,24 @@ cat > "$ROOT/usr/local/sbin/a3-fnperm-hook-setup" <<'FNPERM'
 # 为依赖 libnperm 伪 dirfd 的飞牛服务生成 LD_PRELOAD drop-in
 HOOK=/opt/fnnas/fnacl_faccessat_hook.so
 [ -f "$HOOK" ] || exit 0
-for pair in "trim_main:trim" "trim_upload:uploadsrv" "filestor_service:filestor_service" "sysinfo_service:sysinfo_service"; do
+# 需要 libnperm 伪 dirfd 兼容的飞牛服务（unit:二进制）
+# 覆盖：授权检查(open_gateway/app_center)、上传(is_vol_path_writeable)、
+#       文件管理器(filemanager 由 trim_main 继承)、存储/共享等
+for pair in \
+    "trim_main:trim" \
+    "trim_upload:uploadsrv" \
+    "trim_open_gateway:trim_open_gateway" \
+    "trim_app_center:trim_app_center" \
+    "filestor_service:filestor_service" \
+    "finder_service:finder_service" \
+    "sysinfo_service:sysinfo_service" \
+    "share_service:share_service" \
+    "backup_service:backup_service" \
+    "dlcenter:dlcenter" \
+    "imagesrv:imagesrv" \
+    "multiple-downloads:multiple-downloads" \
+    "trim_sharelink:trim-sharelink" \
+    "webdav:webdav" ; do
     unit=${pair%%:*}
     bin=${pair##*:}
     [ -x "/usr/trim/bin/$bin" ] || continue
@@ -156,6 +173,16 @@ with open(KEYFILE, "wb") as f:
 os.chmod(KEYFILE, 0o600)
 KEYGEN
 chmod 755 "$ROOT/usr/local/sbin/a3-trim-keygen"
+
+# --- 5.y mediasrv socket 别名 ---
+# 音乐/影视通过 /var/run/mediasrv.socket 取媒体信息；软解 mediasrv 实际监听
+# trim_media.sock（nginx 用），所以要建别名，否则播放/扫描报 no such file。
+mkdir -p "$ROOT/etc/systemd/system/mediasrv.service.d"
+cat > "$ROOT/etc/systemd/system/mediasrv.service.d/a3-socket-alias.conf" <<'MSALIAS'
+[Service]
+ExecStartPost=/bin/sh -c 'for i in 1 2 3 4 5; do [ -S /var/run/trim_media.sock ] && break; sleep 1; done; ln -sf /var/run/trim_media.sock /var/run/mediasrv.socket; setfacl -m u:www-data:rw /var/run/trim_media.sock 2>/dev/null || chmod 666 /var/run/trim_media.sock'
+MSALIAS
+
 
 # 把这个 setup 挂到已有的 a3-fnnas-fixes.service 里（它在 early boot 跑）
 # 在 fixes 脚本开头增加调用（幂等）
