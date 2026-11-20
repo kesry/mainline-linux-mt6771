@@ -86,26 +86,76 @@ install -m 0755 "$SCRIPT_DIR/ld-hooks/fakecompat.so" "$ROOT/opt/fnnas/hook/" 2>/
 install -m 0755 "$SCRIPT_DIR/ld-hooks/fnacl_faccessat_hook.so" \
     "$ROOT/opt/fnnas/fnacl_faccessat_hook.so"
 
-# 给所有链接了 libnperm 的服务注入 LD_PRELOAD（开机生效）。
-# 用 a3-fnperm.service 一次性生成 drop-in，避免依赖具体服务列表硬编码。
+# 给需要 libnperm 的飞牛服务注入 LD_PRELOAD（开机生效）。
+#
+# 注意：drop-in 目录名必须和服务 unit 名一致，不能用二进制名（历史 bug）：
+#   trim      -> trim_main.service     （filemanager 由 trim exec，继承环境）
+#   uploadsrv -> trim_upload.service   （is_vol_path_writeable 在这里）
+# filemanager 自身不单独配，它由 trim_main exec 继承。
 cat > "$ROOT/usr/local/sbin/a3-fnperm-hook-setup" <<'FNPERM'
 #!/bin/sh
-# 为所有链接 libnperm 的飞牛服务生成 LD_PRELOAD drop-in
+# 为依赖 libnperm 伪 dirfd 的飞牛服务生成 LD_PRELOAD drop-in
 HOOK=/opt/fnnas/fnacl_faccessat_hook.so
 [ -f "$HOOK" ] || exit 0
-for unit in /usr/trim/bin/*; do
-    [ -f "$unit" ] && [ -x "$unit" ] || continue
-    readelf -d "$unit" 2>/dev/null | grep -q libnperm || continue
-    name=$(basename "$unit")
-    d="/etc/systemd/system/${name}.service.d"
+for pair in "trim_main:trim" "trim_upload:uploadsrv" "filestor_service:filestor_service" "sysinfo_service:sysinfo_service"; do
+    unit=${pair%%:*}
+    bin=${pair##*:}
+    [ -x "/usr/trim/bin/$bin" ] || continue
+    d="/etc/systemd/system/${unit}.service.d"
     mkdir -p "$d"
-    cat > "$d/a3-fnacl.conf" <<EOF
-[Service]
-Environment="LD_PRELOAD=$HOOK"
-EOF
+    printf '[Service]\nEnvironment="LD_PRELOAD=%s"\n' "$HOOK" > "$d/a3-fnacl.conf"
 done
+
+# 生成本机可用的 trim.key.enc（否则 uploadsrv 报 Invalid trim-key 并退出）
+python3 /usr/local/sbin/a3-trim-keygen 2>/dev/null || true
 FNPERM
 chmod 755 "$ROOT/usr/local/sbin/a3-fnperm-hook-setup"
+
+# --- 5.x trim.key.enc 生成 ---
+# 飞牛用 master_key = HMAC-SHA256(SMBIOS UUID 字符串, /etc/machine-id 前32字节)
+# 加密 256 字节随机 trim_key，AES-GCM 存成 IV(12)+CT(256)+TAG(16)=284 字节。
+# 主线内核在 MT6771 上没有 SMBIOS，get_smbios_uuid() 回退常量
+#   "00000000-0000-0000-0000-000000000000"
+# 于是 rootfs 里带的 key 必然解不开，必须在目标机上重算一次。
+cat > "$ROOT/usr/local/sbin/a3-trim-keygen" <<'KEYGEN'
+#!/usr/bin/env python3
+import hashlib, hmac, os, sys
+try:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+except Exception:
+    sys.exit(0)
+
+KEYFILE = "/usr/trim/etc/trim.key.enc"
+UUID = b"00000000-0000-0000-0000-000000000000"
+
+try:
+    mid = open("/etc/machine-id", "rb").read(32)
+except Exception:
+    sys.exit(0)
+if len(mid) < 32:
+    sys.exit(0)
+
+master = hmac.new(UUID, mid, hashlib.sha256).digest()
+
+# 已有 key 能解开就保留（避免每次重启换 key 导致令牌失效）
+if os.path.exists(KEYFILE):
+    try:
+        blob = open(KEYFILE, "rb").read()
+        if len(blob) == 284:
+            AESGCM(master).decrypt(blob[:12], blob[12:], None)
+            sys.exit(0)
+    except Exception:
+        pass
+
+trim_key = os.urandom(256)
+iv = os.urandom(12)
+blob = iv + AESGCM(master).encrypt(iv, trim_key, None)
+os.makedirs(os.path.dirname(KEYFILE), exist_ok=True)
+with open(KEYFILE, "wb") as f:
+    f.write(blob)
+os.chmod(KEYFILE, 0o600)
+KEYGEN
+chmod 755 "$ROOT/usr/local/sbin/a3-trim-keygen"
 
 # 把这个 setup 挂到已有的 a3-fnnas-fixes.service 里（它在 early boot 跑）
 # 在 fixes 脚本开头增加调用（幂等）

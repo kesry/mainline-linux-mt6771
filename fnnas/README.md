@@ -208,6 +208,43 @@ pgbouncer 崩 → /run/pgbouncer/.s.PGSQL.6432 消失
 > 注意：**不要手工启动飞牛的应用**（如 trim-music）。必须由 app-center
 > 自己拉起，否则应用缺少 `TRIM_API_TOKEN`，会报 `authed-dir/list` 未知错误。
 
+### 6.6 网页上传失败（403 / errno 9）的完整修复
+
+飞牛网页上传要过四道关，主线内核上每一道都可能断：
+
+1. **`file.checkUpload` → errno 9**
+   `filemanager` 的 `check_parent_writable()` 走 libnperm 的伪 dirfd
+   `faccessat(-21586, struct...)`，主线内核返回 EBADF(9) → 前端"失败出错"，
+   请求根本到不了 `/upload`。
+   → 修：`fnacl_faccessat_hook.so` 注入 **trim_main**（`filemanager` 由 trim
+   exec，继承环境变量）。
+
+2. **ZFS 缺失**：`checkSpaceAndQuota` 要跑 `zpool status -j`。
+   主线内核没有 ZFS 模块 → 报错。
+   → 修：把 OpenZFS 2.2.7 用 `copy-builtin` 编进内核（`CONFIG_ZFS=y`）。
+   `zpool list` 在无池时返回 `no pools available` 且 rc=0 即正确。
+
+3. **`Invalid trim-key`**
+   `uploadsrv` 启动时用 `load_trim_key()` 解密 `/usr/trim/etc/trim.key.enc`：
+   - `master_key = HMAC-SHA256(SMBIOS UUID 字符串, /etc/machine-id 前 32 字节)`
+   - `trim.key.enc = IV(12) + AES-256-GCM(256B 随机 key) + TAG(16) = 284 字节`
+   MT6771 无 SMBIOS，`get_smbios_uuid()` 回退常量
+   `00000000-0000-0000-0000-000000000000`，所以镜像里带的 key 必然解不开。
+   → 修：`/usr/local/sbin/a3-trim-keygen` 在目标机上按本机 machine-id 重算
+   （`a3-fnperm-hook-setup` 开机调用；key 能解开就保留，避免重启换 key）。
+
+4. **`begin_upload` → 403（"权限不足"）**
+   `uploadsrv` 的 `is_vol_path_writeable()` 同样走 libnperm 伪 dirfd 判权限
+   → 主线内核返回不可写 → 403。
+   → 修：`fnacl_faccessat_hook.so` 注入 **trim_upload**。
+
+5. **长效令牌 `osrt`**（前端要求）
+   登录时必须勾选"保持登录"（stay），服务端才会下发 `osrt` cookie；
+   nginx 的 `trim-cookie-v2-to-v1-map.conf` 把它映射成 `fnos-long-token`，
+   uploadsrv 的 token 校验才通过。不勾选只有 `ost`，上传仍会 403。
+
+验证：上传一个 28MB FLAC，文件正确落在 `/vol1/1000/music/`，无 `*.~#*` 残留。
+
 ### 6.4 内核需要的内核配置
 
 除第 1 节外，存储栈还需要：
