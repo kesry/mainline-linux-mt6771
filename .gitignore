@@ -46,3 +46,7 @@ images/
 *.img
 !vendor/stock-boot-orig.img
 !vendor/a3-empty.cpio.gz
+
+# 备份/旧脚本
+*.bak
+script/a3-usbnet.sh
