@@ -34,12 +34,12 @@
 # ----
 #   $A3_ROOT/vendor/a3-fnnas-<时间戳>.img     boot.img（32 MiB）
 #   $A3_ROOT/out/kernel-modules-<ver>.tar.gz   内核模块
-#   $A3_ROOT/out/fnnas-rootfs-<时间戳>.img     飞牛 rootfs
+#   $A3_ROOT/out/fnnas-rootfs.img / .simg   飞牛 rootfs（raw + fastboot sparse）
 #
 # 刷入（设备进 fastboot）
 # ----------------------
 #   fastboot flash boot  vendor/a3-fnnas-<ts>.img
-#   fastboot flash userdata out/fnnas-rootfs-<ts>.img     # 会清空用户数据
+#   fastboot flash userdata out/fnnas-rootfs.simg   # 用 sparse 镜像，分块写入     # 会清空用户数据
 
 set -euo pipefail
 
@@ -132,15 +132,12 @@ pack_boot() {
 # ---------------------------------------------------------------- 4. rootfs
 build_rootfs() {
     say "4/5 制作飞牛 rootfs（含全部兼容修复）"
-    local name="fnnas-rootfs-$(ts).img"
     # 素材来源：本地路径（若给）或 GitHub source release（脚本内自动下载）
+    # 产物固定为 out/fnnas-rootfs.img（+ .simg，由 build-rootfs-fnnas.sh 生成）
     OUT="$A3_ROOT/out" bash "$A3_ROOT/fnnas/build-rootfs-fnnas.sh" \
         "$ISO" "$TRIMLIB" "$IMG_SIZE_G"
-    # build-rootfs-fnnas.sh 固定输出 out/fnnas-rootfs.img
-    if [ -f "$A3_ROOT/out/fnnas-rootfs.img" ]; then
-        mv -f "$A3_ROOT/out/fnnas-rootfs.img" "$A3_ROOT/out/$name"
-        info "产物: out/$name"
-    fi
+    [ -f "$A3_ROOT/out/fnnas-rootfs.img" ] || die "rootfs 未生成"
+    info "产物: out/fnnas-rootfs.img ($(ls -lh "$A3_ROOT/out/fnnas-rootfs.img" | awk '{print $5}'))"
 }
 
 # ---------------------------------------------------------------- 5. 模块注入 rootfs
@@ -165,6 +162,15 @@ EOF
     sync
     umount "$mnt"; rmdir "$mnt"
     info "已注入 /lib/modules/$v（$n 个模块）"
+
+    # 注入模块后 img 内容变了，必须重新生成 simg（fastboot 可写）
+    if command -v img2simg >/dev/null 2>&1; then
+        local simg="${img%.img}.simg"
+        say "5.5/5 重新生成 simg（模块注入后）"
+        rm -f "$simg"
+        img2simg "$img" "$simg"
+        info "simg: $simg ($(ls -lh "$simg" | awk '{print $5}'))"
+    fi
     info "rootfs: $img"
 }
 
@@ -175,7 +181,7 @@ case "$MODE" in
         pack_modules
         pack_boot
         build_rootfs
-        inject_modules "$(ls -t "$A3_ROOT"/out/fnnas-rootfs-*.img 2>/dev/null | head -1)"
+        inject_modules "$A3_ROOT/out/fnnas-rootfs.img"
         ;;
     boot)
         pack_boot
@@ -183,17 +189,18 @@ case "$MODE" in
     rootfs)
         pack_modules
         build_rootfs
-        inject_modules "$(ls -t "$A3_ROOT"/out/fnnas-rootfs-*.img 2>/dev/null | head -1)"
+        inject_modules "$A3_ROOT/out/fnnas-rootfs.img"
         ;;
 esac
 
 say "完成"
 info "boot.img  : $(ls -t "$A3_IMG"/a3-fnnas-*.img 2>/dev/null | head -1)"
-info "rootfs    : $(ls -t "$A3_ROOT"/out/fnnas-rootfs-*.img 2>/dev/null | head -1)"
+info "rootfs    : $A3_ROOT/out/fnnas-rootfs.img"
+info "simg      : $A3_ROOT/out/fnnas-rootfs.simg"
 info "modules   : $A3_ROOT/out/kernel-modules-$(kver).tar.gz"
 cat <<'EOF'
 
 刷入（设备进 fastboot 后）：
   fastboot flash boot     <上面的 boot.img>
-  fastboot flash userdata <上面的 rootfs.img>   # 注意：会清空用户数据
+  fastboot flash userdata <上面的 simg>   # 注意：会清空用户数据
 EOF
