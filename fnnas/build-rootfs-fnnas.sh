@@ -86,17 +86,10 @@ fi
 ROOT="$WORK/rootfs"
 if [ ! -f "$ROOT/etc/fstab" ]; then
     rm -rf "$ROOT" && mkdir -p "$ROOT"
-    # 限速 + 清缓存，避免构建机大文件写入 OOM
-    CLEANER_PID=""
-    ( while true; do sync; echo 3 > /proc/sys/vm/drop_caches 2>/dev/null; sleep 2; done ) &
-    CLEANER_PID=$!
-    sysctl -w vm.dirty_ratio=5 >/dev/null 2>&1 || true
-    sysctl -w vm.dirty_background_ratio=1 >/dev/null 2>&1 || true
-    pv -L 15m < "$WORK/trimfs.tgz" 2>/dev/null | tar xzf - -C "$ROOT" || \
-        tar xzf "$WORK/trimfs.tgz" -C "$ROOT"
-    kill "$CLEANER_PID" 2>/dev/null || true
-    sysctl -w vm.dirty_ratio=20 >/dev/null 2>&1 || true
-    sysctl -w vm.dirty_background_ratio=10 >/dev/null 2>&1 || true
+    # 直接解压（不再用 pv 限速管道，它在 CI 上会报 gzip unexpected EOF 且慢）
+    # tgz 已通过 gzip -t 校验，直接 tar 解压即可。
+    tar xzf "$WORK/trimfs.tgz" -C "$ROOT"
+    [ -f "$ROOT/etc/fstab" ] || { echo "rootfs 解压不完整（缺 etc/fstab）" >&2; exit 1; }
 fi
 say "  rootfs: $(du -sh "$ROOT" | cut -f1)"
 
@@ -255,9 +248,7 @@ s=open(p).read()
 line='/usr/local/sbin/a3-fnperm-hook-setup 2>/dev/null || true'
 if line not in s:
     marker='# 1. mdadm wrapper'
-    s=s.replace(marker, line+'
-
-'+marker, 1)
+    s=s.replace(marker, line+'\\n'+marker, 1)
     open(p,'w').write(s)
 PY2
 
