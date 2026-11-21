@@ -245,6 +245,102 @@ pgbouncer 崩 → /run/pgbouncer/.s.PGSQL.6432 消失
 
 验证：上传一个 28MB FLAC，文件正确落在 `/vol1/1000/music/`，无 `*.~#*` 残留。
 
+### 6.7 一键构建（内核 + boot.img + rootfs + 模块注入）
+
+```sh
+# 全流程：编内核/模块 → boot.img → 飞牛 rootfs → 注入模块
+./script/a3-fnnas-all.sh <fnos-arm.iso> <trim-media-lib.zip> [rootfs大小G]
+
+# 只重打 boot.img（内核已编好）
+./script/a3-fnnas-all.sh --boot-only
+
+# 只重做 rootfs 并注入模块
+./script/a3-fnnas-all.sh --rootfs-only <iso> <trimlib> [size]
+```
+
+关键点：
+
+- **必须用 `A3_DTB=vendor/a3-v186-tgpio.dtb`**（脚本已默认）。`a3-v186-good.dtb`
+  没有 `panel@0` 节点 → `mediatek-drm` 不 probe → 屏幕停在第一屏，脚本会直接拒绝。
+- **`=m` 的内核模块必须进 rootfs**，否则 `CONFIG_PWM_MTK_DISP=m` 等驱动缺失。
+  脚本会 `modules_install` 到暂存目录，连同 `trim_acl_shim.ko` 一起打成
+  `out/kernel-modules-<ver>.tar.gz`，再解进 rootfs 的 `/lib/modules/<ver>/`
+  并跑 `depmod`。
+- 模块与内核**必须同一次编译**：vermagic 里带 git 描述符，内核一改就对不上。
+
+### 6.8 内核配置必须落在 defconfig 里（否则 CI 会丢）
+
+CI（`.github/workflows/verify-kernel.yml`）流程是：
+
+```
+patch -p1 < patch/*.patch   →   make a3_defconfig   →   make Image
+```
+
+所以**只改 `qdiag/.config` 是没用的**——CI 从 `a3_defconfig` 重新生成。
+新增内核选项的正确做法：
+
+```sh
+# 1. 在已编译的树上开选项
+./kernel-src/scripts/config --file qdiag/.config -e ZFS
+make -C kernel-src O=$PWD/qdiag ARCH=arm64 olddefconfig
+
+# 2. 固化成 defconfig
+make -C kernel-src O=$PWD/qdiag ARCH=arm64 savedefconfig
+cp qdiag/defconfig kernel-src/arch/arm64/configs/a3_defconfig
+
+# 3. 生成 patch（相对上一版 defconfig 的 diff）
+#    patch/0007-arm64-configs-a3-enable-ZFS-BTRFS-quota-MD-DM.patch
+```
+
+`patch/0007` 把飞牛需要但原来缺失的选项补齐：
+
+```
+SCSI / BLK_DEV_SD / CHR_DEV_SG        （U 盘、移动硬盘）
+MD / MD_LINEAR=m / BLK_DEV_DM         （飞牛存储池 mdadm + LVM）
+DM_CRYPT / DM_SNAPSHOT / DM_THIN_PROVISIONING / DM_MIRROR / DM_RAID
+TARGET_CORE
+BTRFS_FS / BTRFS_FS_POSIX_ACL
+QFMT_V1 / QFMT_V2                     （prjquota 必需）
+ZFS=y                                 （checkSpaceAndQuota 会跑 zpool）
+```
+
+验证方式（等价于 CI）：
+
+```sh
+make -C kernel-src O=/tmp/cfgtest ARCH=arm64 a3_defconfig
+grep -E '^CONFIG_(ZFS|BTRFS_FS|QFMT_V2|MD|BLK_DEV_DM|EFI|DMI)=' /tmp/cfgtest/.config
+```
+
+### 6.9 伪 dirfd 系列系统调用（删除/上传目录/改名都靠它）
+
+`fnacl_faccessat_hook.so` 不只 hook `faccessat`，还覆盖 `*at` 家族——
+飞牛把私有语义塞进**负数 dirfd**：
+
+| 调用 | 伪 dirfd | 用途 |
+| --- | --- | --- |
+| `faccessat` | -21586 … -21575 | 权限判定（11 个 trim_syscall） |
+| `unlinkat` | -7125 | 删除文件 |
+| `renameat2` / `statx` / `utimensat` | -7125 等 | 改名 / 取属性 / 改时间 |
+
+主线内核把这些当真实 fd → `EBADF(9)`，于是删除、上传目录全部失败。
+
+hook 的处理：
+
+1. 负数 dirfd（排除 `AT_FDCWD`）→ 取真实路径
+   - 以 `/` 开头直接用
+   - 像路径串（`vol1/1000/...`）→ 根相对，补 `/` 前缀
+   - 否则当成 libnperm 的 struct，解引用首字段
+2. 用 `AT_FDCWD` 调真正的函数
+3. **`faccessat` 的 mode/flags 要清洗**：飞牛在 `mode` 里夹带 `0x8` 这类私有位，
+   直接透传会让 `faccessat2` 返回 `EINVAL(22)`
+   （`mode &= 7`，`flags &= AT_SYMLINK_NOFOLLOW|AT_EACCESS|AT_EMPTY_PATH`）
+
+排查时可开日志：
+
+```sh
+Environment="FNACL_LOG=1"      # 写到 /tmp/fnacl.log
+```
+
 ### 6.4 内核需要的内核配置
 
 除第 1 节外，存储栈还需要：
