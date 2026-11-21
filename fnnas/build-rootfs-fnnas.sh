@@ -92,6 +92,33 @@ install -m 0755 "$SCRIPT_DIR/ld-hooks/fnacl_faccessat_hook.so" \
 #   trim      -> trim_main.service     （filemanager 由 trim exec，继承环境）
 #   uploadsrv -> trim_upload.service   （is_vol_path_writeable 在这里）
 # filemanager 自身不单独配，它由 trim_main exec 继承。
+# --- 4.x sshfs 默认权限（远程挂载复制后目录不可进入）---
+# 飞牛 mountmgr 调 sshfs 不指定 file_mode/dir_mode，远端条目常返回 mode 000；
+# 飞牛复制/移动会原样保留该 mode，导致复制出来的目录 0 权限、点进去提示
+# "没有权限"。用 wrapper 补默认值（用户显式指定时不覆盖）。
+cat > "$ROOT/usr/bin/sshfs.new" <<'SSHFSWRAP'
+#!/bin/bash
+ARGS=(); HAS_FM=0; HAS_DM=0
+for a in "$@"; do
+    case "$a" in
+        *file_mode*) HAS_FM=1 ;;
+        *dir_mode*)  HAS_DM=1 ;;
+    esac
+    ARGS+=("$a")
+done
+EXTRA=()
+[ "$HAS_FM" = 0 ] && EXTRA+=("-o" "file_mode=0644")
+[ "$HAS_DM" = 0 ] && EXTRA+=("-o" "dir_mode=0755")
+exec /usr/bin/sshfs.real "${ARGS[@]}" "${EXTRA[@]}"
+SSHFSWRAP
+if [ -f "$ROOT/usr/bin/sshfs" ]; then
+    if [ ! -e "$ROOT/usr/bin/sshfs.real" ]; then
+        cp -a "$ROOT/usr/bin/sshfs" "$ROOT/usr/bin/sshfs.real"
+    fi
+    chmod 755 "$ROOT/usr/bin/sshfs.new"
+    mv -f "$ROOT/usr/bin/sshfs.new" "$ROOT/usr/bin/sshfs"
+fi
+
 cat > "$ROOT/usr/local/sbin/a3-fnperm-hook-setup" <<'FNPERM'
 #!/bin/sh
 # 为依赖 libnperm 伪 dirfd 的飞牛服务生成 LD_PRELOAD drop-in
