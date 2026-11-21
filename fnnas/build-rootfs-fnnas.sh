@@ -224,13 +224,16 @@ os.chmod(KEYFILE, 0o600)
 KEYGEN
 chmod 755 "$ROOT/usr/local/sbin/a3-trim-keygen"
 
-# --- 5.y mediasrv socket 别名 ---
-# 音乐/影视通过 /var/run/mediasrv.socket 取媒体信息；软解 mediasrv 实际监听
-# trim_media.sock（nginx 用），所以要建别名，否则播放/扫描报 no such file。
+# --- 5.y mediasrv socket 权限 ---
+# 重要：mediasrv 与 trim-media（影视 app）必须各用各的 socket，不能互相软链：
+#   /var/run/mediasrv.socket  <- 软解 mediasrv（音乐 media.* API + 转码，返回 JSON）
+#   /var/run/trim_media.sock  <- 飞牛影视 app（nginx /v 反向代理，返回 HTML/媒体）
+# 之前把 mediasrv.socket 软链到 trim_media.sock，导致音乐连到影视 app 拿到 HTML，
+# 报 "invalid character '<'" 扫不了码。已改为各自独立。
 mkdir -p "$ROOT/etc/systemd/system/mediasrv.service.d"
 cat > "$ROOT/etc/systemd/system/mediasrv.service.d/a3-socket-alias.conf" <<'MSALIAS'
 [Service]
-ExecStartPost=/bin/sh -c 'for i in 1 2 3 4 5; do [ -S /var/run/trim_media.sock ] && break; sleep 1; done; ln -sf /var/run/trim_media.sock /var/run/mediasrv.socket; setfacl -m u:www-data:rw /var/run/trim_media.sock 2>/dev/null || chmod 666 /var/run/trim_media.sock'
+ExecStartPost=/bin/sh -c 'for i in 1 2 3 4 5; do [ -S /var/run/mediasrv.socket ] && break; sleep 1; done; chmod 666 /var/run/mediasrv.socket 2>/dev/null || true'
 MSALIAS
 
 
@@ -317,8 +320,7 @@ mkdir -p "$ROOT/etc/systemd/system/mediasrv.service.d"
 cat > "$ROOT/etc/systemd/system/mediasrv.service.d/override.conf" <<'UNIT'
 [Service]
 ExecStart=
-ExecStart=/opt/trimmedia/bin/mediasrv -o /usr/trim/logs/mediasrv.log -a /var/run/trim_media.sock
-ExecStartPost=/bin/sh -c 'for i in 1 2 3 4 5; do [ -S /var/run/trim_media.sock ] && break; sleep 1; done; setfacl -m u:www-data:rw /var/run/trim_media.sock 2>/dev/null || chmod 666 /var/run/trim_media.sock'
+ExecStart=/opt/trimmedia/bin/mediasrv -o /usr/trim/logs/mediasrv.log -a /var/run/mediasrv.socket
 Environment=LD_LIBRARY_PATH=/opt/trimmedia/lib/mediasrv/lib:/opt/trimmedia/lib:/usr/trim/lib/mediasrv/lib:/usr/lib/aarch64-linux-gnu
 Environment=LD_PRELOAD=/opt/fnnas/hook/nodri.so:/opt/fnnas/hook/nodmaheap.so:/opt/fnnas/hook/fakecompat.so
 Environment=PATH=/opt/trimmedia/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
