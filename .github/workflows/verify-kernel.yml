@@ -11,11 +11,15 @@ on:
         type: boolean
         default: true
       build_rootfs_minimal:
-        description: '构建 rootfs-minimal.img（最小系统 + SSH）'
+        description: '构建 rootfs-minimal（最小系统 + SSH）'
         type: boolean
         default: true
-      build_rootfs_phosh:
-        description: '构建 rootfs-phosh.img（最小系统 + phosh 桌面）'
+      build_rootfs_desktop:
+        description: '构建 rootfs-desktop（phosh 桌面）'
+        type: boolean
+        default: true
+      build_rootfs_fnos:
+        description: '构建 rootfs-fnos（飞牛 FnNAS）'
         type: boolean
         default: true
   push:
@@ -23,6 +27,7 @@ on:
       - 'patch/**'
       - 'script/**'
       - 'vendor/**'
+      - 'fnnas/**'
       - '.github/workflows/**'
 
 # 同一分支只保留最新一次运行：新提交会取消还在跑的旧运行
@@ -34,7 +39,7 @@ jobs:
   build:
     name: 应用补丁、编译内核、打包镜像
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 240
 
     steps:
       - name: 取出本仓库
@@ -53,9 +58,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             gcc-aarch64-linux-gnu bc bison flex libssl-dev libelf-dev \
-            make xz-utils ca-certificates \
+            make xz-utils ca-certificates zip p7zip-full \
             debootstrap qemu-user-static binfmt-support \
-            e2fsprogs python3 zstd
+            e2fsprogs python3 zstd \
+            android-sdk-libsparse-utils
 
       - name: 显示 qemu/binfmt 状态
         run: |
@@ -118,22 +124,85 @@ jobs:
           sudo mkdir -p /work && sudo chown "$USER" /work
           sudo -E script/build-rootfs.sh minimal out/rootfs-minimal.img 1G
 
-      - name: 构建 rootfs-phosh.img
-        if: github.event_name != 'workflow_dispatch' || inputs.build_rootfs_phosh
+      - name: 构建 rootfs-desktop.img（phosh）
+        if: github.event_name != 'workflow_dispatch' || inputs.build_rootfs_desktop
         run: |
           set -e
           chmod +x script/*.sh
           sudo mkdir -p /work && sudo chown "$USER" /work
-          sudo -E script/build-rootfs.sh phosh out/rootfs-phosh.img 3G
+          sudo -E script/build-rootfs.sh phosh out/rootfs-desktop.img 3G
 
-      - name: 上传产物
+      - name: 构建 rootfs-fnos.img（飞牛 FnNAS）
+        if: github.event_name != 'workflow_dispatch' || inputs.build_rootfs_fnos
+        run: |
+          set -e
+          chmod +x script/*.sh fnnas/*.sh
+          # 素材（trimfs.tgz / trim-media-lib.zip）由脚本从 GitHub source release 自动下载
+          WORK="$PWD/wv/fnnas-build" OUT="$PWD/out" \
+            bash fnnas/build-rootfs-fnnas.sh "" "" 8
+          ls -lh out/fnnas-rootfs.img out/fnnas-rootfs.simg
+
+      # ---- 把 rootfs 转成 fastboot 可写的 simg，并单独 zip 压缩 ----
+      - name: 生成 simg 并压缩 rootfs
+        if: always()
+        run: |
+          set -e
+          mkdir -p release
+          # boot 不压缩，直接放（供独立上传）
+          [ -f out/boot.img ] && cp -v out/boot.img release/boot.img || true
+          # 其余三个 rootfs：img -> simg -> zip
+          for pair in \
+            "rootfs-minimal:rootfs-minimal" \
+            "rootfs-desktop:rootfs-desktop" \
+            "fnnas-rootfs:rootfs-fnos"; do
+            src="${pair%%:*}"; dst="${pair##*:}"
+            img="out/${src}.img"
+            [ -f "$img" ] || { echo "跳过 $img（未构建）"; continue; }
+            simg="out/${src}.simg"
+            if [ ! -f "$simg" ]; then
+              echo "生成 $simg"
+              img2simg "$img" "$simg"
+            fi
+            ls -lh "$simg"
+            ( cd out && zip -q "../release/${dst}.simg.zip" "${src}.simg" )
+            ls -lh "release/${dst}.simg.zip"
+          done
+          echo "=== release 目录 ==="
+          ls -lh release/
+
+      # ---- 四个独立 artifact ----
+      - name: 上传 boot.img
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: a3-images
-          path: |
-            out/*.img
-            linux-6.12.115/arch/arm64/boot/Image
-            linux-6.12.115/System.map
+          name: boot
+          path: release/boot.img
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: 上传 rootfs-minimal
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rootfs-minimal
+          path: release/rootfs-minimal.simg.zip
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: 上传 rootfs-desktop
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rootfs-desktop
+          path: release/rootfs-desktop.simg.zip
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: 上传 rootfs-fnos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rootfs-fnos
+          path: release/rootfs-fnos.simg.zip
           if-no-files-found: warn
           retention-days: 14

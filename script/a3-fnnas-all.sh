@@ -13,13 +13,14 @@
 #
 # 用法
 # ----
-#   ./a3-fnnas-all.sh <fnos-arm.iso> <trim-media-lib.zip> [rootfs大小G]
+#   ./a3-fnnas-all.sh                     # 素材自动从 GitHub source release 下载
+#   ./a3-fnnas-all.sh [rootfs大小G]        # 也可传本地素材（见下）
 #
 #   # 只重打 boot.img（内核已编好）
 #   ./a3-fnnas-all.sh --boot-only
 #
 #   # 只重做 rootfs（内核已编好）
-#   ./a3-fnnas-all.sh --rootfs-only <iso> <trimlib> [size]
+#   ./a3-fnnas-all.sh --rootfs-only [size]
 #
 # 环境变量
 # -------
@@ -63,9 +64,17 @@ case "${1:-}" in
     -h|--help)     sed -n '2,45p' "$0"; exit 0 ;;
 esac
 
-ISO="${1:-}"
-TRIMLIB="${2:-}"
-IMG_SIZE_G="${3:-8}"
+# 本地素材可选；不传则由 build-rootfs-fnnas.sh 从 GitHub source release 下载
+ISO="${FNOS_ISO:-}"
+TRIMLIB="${TRIMLIB_ZIP:-}"
+# 兼容旧位置参数：<iso> <trimlib> [size]
+if [ -n "${1:-}" ] && [[ "$1" == /* || "$1" == *.iso ]]; then
+    ISO="$1"; shift
+    if [ -n "${1:-}" ] && [[ "$1" == /* || "$1" == *.zip ]]; then
+        TRIMLIB="$1"; shift
+    fi
+fi
+IMG_SIZE_G="${1:-8}"
 
 [ -f "$SRC/Makefile" ] || die "找不到内核源码：$SRC"
 
@@ -123,11 +132,8 @@ pack_boot() {
 # ---------------------------------------------------------------- 4. rootfs
 build_rootfs() {
     say "4/5 制作飞牛 rootfs（含全部兼容修复）"
-    [ -n "$ISO" ]     || die "需要飞牛 ARM ISO 路径"
-    [ -f "$ISO" ]     || die "ISO 不存在: $ISO"
-    [ -n "$TRIMLIB" ] || die "需要 trim-media-lib.zip"
-    [ -f "$TRIMLIB" ] || die "trimlib 不存在: $TRIMLIB"
     local name="fnnas-rootfs-$(ts).img"
+    # 素材来源：本地路径（若给）或 GitHub source release（脚本内自动下载）
     OUT="$A3_ROOT/out" bash "$A3_ROOT/fnnas/build-rootfs-fnnas.sh" \
         "$ISO" "$TRIMLIB" "$IMG_SIZE_G"
     # build-rootfs-fnnas.sh 固定输出 out/fnnas-rootfs.img

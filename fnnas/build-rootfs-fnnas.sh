@@ -26,9 +26,16 @@
 
 set -e
 
-ISO="${1:?用法: $0 <fnos-arm.iso> <trim-media-lib.zip> [输出镜像大小G]}"
-TRIMLIB="${2:?需要 trim-media-lib.zip}"
-IMG_SIZE_G="${3:-16}"
+# 飞牛构建素材统一从 GitHub source release 下载（CI / 本地一致）：
+#   https://github.com/kesry/mainline-linux-mt6771/releases/download/source/
+# 参数仍可显式覆盖（本地已有文件时传本地路径即可）。
+SOURCE_BASE="https://github.com/kesry/mainline-linux-mt6771/releases/download/source"
+TRIMFS_URL="${TRIMFS_URL:-$SOURCE_BASE/trimfs.tgz}"
+TRIMLIB_URL="${TRIMLIB_URL:-$SOURCE_BASE/trim-media-lib.zip}"
+
+ISO="${1:-}"          # 兼容旧参数：本地 ISO（保留为空则从 URL 下载 trimfs.tgz）
+TRIMLIB="${2:-}"      # 兼容旧参数：本地 trim-media-lib.zip
+IMG_SIZE_G="${3:-8}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORK="${WORK:-/opt/oppoa3/wv/fnnas-build}"
 OUT="${OUT:-/opt/oppoa3/out}"
@@ -45,10 +52,27 @@ say() { echo "$*"; }
 # ------------------------------------------------------------
 # 1. 解出飞牛 rootfs
 # ------------------------------------------------------------
-say "=== 1/5 从 ISO 提取并解包 trimfs.tgz ==="
+say "=== 1/5 获取并解包 trimfs.tgz ==="
 mkdir -p "$WORK" "$OUT"
-if [ ! -f "$WORK/trimfs.tgz" ]; then
-    7z e -y -o"$WORK" "$ISO" "trimfs.tgz"
+if [ -n "$ISO" ] && [ -f "$ISO" ]; then
+    # 旧用法：从本地 ISO 提取
+    if [ ! -f "$WORK/trimfs.tgz" ]; then
+        7z e -y -o"$WORK" "$ISO" "trimfs.tgz"
+    fi
+elif [ ! -f "$WORK/trimfs.tgz" ]; then
+    # 新用法：从 GitHub source release 下载
+    say "  下载 $TRIMFS_URL"
+    curl -fsSL --retry 3 -o "$WORK/trimfs.tgz" "$TRIMFS_URL"
+fi
+[ -f "$WORK/trimfs.tgz" ] || { echo "trimfs.tgz 获取失败" >&2; exit 1; }
+
+# trim-media-lib.zip（软解媒体服务）：未传本地文件时也从 release 下载
+if [ -z "$TRIMLIB" ] || [ ! -f "$TRIMLIB" ]; then
+    TRIMLIB="$WORK/trim-media-lib.zip"
+    if [ ! -f "$TRIMLIB" ]; then
+        say "  下载 $TRIMLIB_URL"
+        curl -fsSL --retry 3 -o "$TRIMLIB" "$TRIMLIB_URL"
+    fi
 fi
 ROOT="$WORK/rootfs"
 if [ ! -f "$ROOT/etc/fstab" ]; then
@@ -296,9 +320,10 @@ ExecStart=
 ExecStart=/opt/trimmedia/bin/mediasrv -o /usr/trim/logs/mediasrv.log -a /var/run/trim_media.sock
 ExecStartPost=/bin/sh -c 'for i in 1 2 3 4 5; do [ -S /var/run/trim_media.sock ] && break; sleep 1; done; setfacl -m u:www-data:rw /var/run/trim_media.sock 2>/dev/null || chmod 666 /var/run/trim_media.sock'
 Environment=LD_LIBRARY_PATH=/opt/trimmedia/lib/mediasrv/lib:/opt/trimmedia/lib:/usr/trim/lib/mediasrv/lib:/usr/lib/aarch64-linux-gnu
+Environment=LD_PRELOAD=/opt/fnnas/hook/nodri.so:/opt/fnnas/hook/nodmaheap.so:/opt/fnnas/hook/fakecompat.so
 Environment=PATH=/opt/trimmedia/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 UNIT
-say "  软解 mediasrv 已安装，socket ACL drop-in 已配置"
+say "  软解 mediasrv 已安装（LD_PRELOAD 三件套 hook 已写进启动 unit），socket ACL drop-in 已配置"
 
 # ------------------------------------------------------------
 # 5. 注入主线内核兼容补丁（绕开飞牛私有内核特性）
@@ -459,6 +484,19 @@ sync
 umount "$MNT"
 losetup -d "$LOOP"
 e2fsck -fy "$IMG" >/dev/null 2>&1 || true
+
+# 生成 fastboot 可写的 sparse image（simg）
+# fastboot flash userdata 只接受 sparse 镜像；原始 img 保留供校验/再加工。
+SIMG="${IMG%.img}.simg"
+if command -v img2simg >/dev/null 2>&1; then
+    say "=== 生成 simg（fastboot 可写）==="
+    rm -f "$SIMG"
+    img2simg "$IMG" "$SIMG"
+    ls -lh "$SIMG"
+    md5sum "$SIMG"
+else
+    echo "警告: 找不到 img2simg，跳过 simg 生成（fastboot 需 raw img）" >&2
+fi
 
 say "=== 完成 ==="
 ls -lh "$IMG"
