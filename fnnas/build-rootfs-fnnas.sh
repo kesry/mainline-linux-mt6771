@@ -475,26 +475,10 @@ IMG="$OUT/fnnas-rootfs.img"
 BLOCKS=$((IMG_SIZE_G * 1024 * 1024))   # 4K 块数
 rm -f "$IMG"
 
-# 低内存打包：mkfs 空镜像 → loop 挂载 → 限速 tar 拷贝 → 卸载
+# 打包 ext4：用 mke2fs -d 直接从目录生成，无需 loop 设备
+# （GitHub Actions runner 不允许 losetup：Permission denied）
 truncate -s "${IMG_SIZE_G}G" "$IMG"
-mkfs.ext4 -q -F -L fnos-root "$IMG"
-
-MNT="$WORK/mnt"
-mkdir -p "$MNT"
-umount "$MNT" 2>/dev/null || true
-LOOP=$(losetup -f)
-losetup "$LOOP" "$IMG"
-mount -t ext4 "$LOOP" "$MNT"
-
-CLEANER_PID=""
-( while true; do sync; echo 3 > /proc/sys/vm/drop_caches 2>/dev/null; sleep 2; done ) &
-CLEANER_PID=$!
-tar -C "$ROOT" -cf - . | pv -L 15m 2>/dev/null | tar -C "$MNT" -xf - || \
-    tar -C "$ROOT" -cf - . | tar -C "$MNT" -xf -
-kill "$CLEANER_PID" 2>/dev/null || true
-sync
-umount "$MNT"
-losetup -d "$LOOP"
+mke2fs -q -t ext4 -F -d "$ROOT" -L fnos-root "$IMG"
 e2fsck -fy "$IMG" >/dev/null 2>&1 || true
 
 # 生成 fastboot 可写的 sparse image（simg）
