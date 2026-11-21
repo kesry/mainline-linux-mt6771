@@ -60,11 +60,20 @@ if [ -n "$ISO" ] && [ -f "$ISO" ]; then
         7z e -y -o"$WORK" "$ISO" "trimfs.tgz"
     fi
 elif [ ! -f "$WORK/trimfs.tgz" ]; then
-    # 新用法：从 GitHub source release 下载
+    # 新用法：从 GitHub source release 下载（1.9GB，易中断，带校验重试）
     say "  下载 $TRIMFS_URL"
-    curl -fsSL --retry 3 -o "$WORK/trimfs.tgz" "$TRIMFS_URL"
+    for attempt in 1 2 3; do
+        say "  下载尝试 $attempt/3"
+        rm -f "$WORK/trimfs.tgz"
+        # -C - 断点续传；--retry 内部也重试；长超时防大文件中断
+        curl -fL --retry 5 --retry-delay 3 --connect-timeout 30 \
+             --max-time 900 -o "$WORK/trimfs.tgz" "$TRIMFS_URL" && \
+            gzip -t "$WORK/trimfs.tgz" 2>/dev/null && break
+        say "  下载不完整或校验失败，重试..."
+    done
 fi
 [ -f "$WORK/trimfs.tgz" ] || { echo "trimfs.tgz 获取失败" >&2; exit 1; }
+gzip -t "$WORK/trimfs.tgz" 2>/dev/null || { echo "trimfs.tgz 校验失败" >&2; exit 1; }
 
 # trim-media-lib.zip（软解媒体服务）：未传本地文件时也从 release 下载
 if [ -z "$TRIMLIB" ] || [ ! -f "$TRIMLIB" ]; then
@@ -301,6 +310,14 @@ mkdir -p "$ROOT/etc/systemd/system/getty.target.wants"
 ln -sf /usr/lib/systemd/system/serial-getty@.service \
     "$ROOT/etc/systemd/system/getty.target.wants/serial-getty@ttyGS0.service" 2>/dev/null || true
 say "  RNDIS+ACM gadget、网络、getty 已配置"
+
+# --- 可选：RNDIS -> ECM 自动切换（由 A3_USBNET_AUTO_ECM=1 开启）---
+# 默认不打；需要设备放到只认 CDC-ECM 的 NAS 时，构建时设 A3_USBNET_AUTO_ECM=1
+if [ "${A3_USBNET_AUTO_ECM:-0}" = "1" ]; then
+    say "  注入自动切 ECM（A3_USBNET_AUTO_ECM=1）"
+    bash "$SCRIPT_DIR/../script/a3-usbnet-install.sh" \
+        "$ROOT" "$SCRIPT_DIR/../script" "a3-gadget"
+fi
 
 # ------------------------------------------------------------
 # 4. 替换 mediasrv 为软解版

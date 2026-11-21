@@ -22,6 +22,10 @@ on:
         description: '构建 rootfs-fnos（飞牛 FnNAS）'
         type: boolean
         default: true
+      auto_ecm:
+        description: '三个 rootfs 注入 RNDIS→ECM 自动切换（放 NAS 用；Windows 调试勿选）'
+        type: boolean
+        default: true
   push:
     paths:
       - 'patch/**'
@@ -57,7 +61,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            gcc-aarch64-linux-gnu bc bison flex libssl-dev libelf-dev \
+            gcc-aarch64-linux-gnu libc6-dev-arm64-cross bc bison flex libssl-dev libelf-dev \
             make xz-utils ca-certificates zip p7zip-full \
             debootstrap qemu-user-static binfmt-support \
             e2fsprogs python3 zstd \
@@ -122,6 +126,7 @@ jobs:
           set -e
           chmod +x script/*.sh
           sudo mkdir -p /work && sudo chown "$USER" /work
+          A3_USBNET_AUTO_ECM="${{ github.event_name == 'workflow_dispatch' && inputs.auto_ecm && '1' || '0' }}" \
           sudo -E script/build-rootfs.sh minimal out/rootfs-minimal.img 1G
 
       - name: 构建 rootfs-desktop.img（phosh）
@@ -130,6 +135,7 @@ jobs:
           set -e
           chmod +x script/*.sh
           sudo mkdir -p /work && sudo chown "$USER" /work
+          A3_USBNET_AUTO_ECM="${{ github.event_name == 'workflow_dispatch' && inputs.auto_ecm && '1' || '0' }}" \
           sudo -E script/build-rootfs.sh phosh out/rootfs-desktop.img 3G
 
       - name: 构建 rootfs-fnos.img（飞牛 FnNAS）
@@ -139,6 +145,7 @@ jobs:
           chmod +x script/*.sh fnnas/*.sh
           # 素材（trimfs.tgz / trim-media-lib.zip）由脚本从 GitHub source release 自动下载
           WORK="$PWD/wv/fnnas-build" OUT="$PWD/out" \
+          A3_USBNET_AUTO_ECM="${{ github.event_name == 'workflow_dispatch' && inputs.auto_ecm && '1' || '0' }}" \
             bash fnnas/build-rootfs-fnnas.sh "" "" 8
           ls -lh out/fnnas-rootfs.img out/fnnas-rootfs.simg
 

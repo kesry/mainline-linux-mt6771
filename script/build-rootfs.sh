@@ -175,6 +175,12 @@ WantedBy=multi-user.target
 UNIT
 in_root "systemctl enable a3-usb-gadget.service"
 
+# 可选：RNDIS -> ECM 自动切换（由 A3_USBNET_AUTO_ECM=1 开启）
+if [ "${A3_USBNET_AUTO_ECM:-0}" = "1" ]; then
+    say "阶段 X：注入自动切 ECM"
+    bash "$(dirname "$0")/a3-usbnet-install.sh" "$ROOT" "$(dirname "$0")" "a3-usb-gadget"
+fi
+
 # ACM 串口还需要一个 getty 在 /dev/ttyGS0 上等登录，否则主机打开 COM 口
 # 只能看到空白，命令打进去没有任何响应。
 # 注意不能 enable serial-getty@ttyS0：那是 SoC 的 UART，本机没引出。
