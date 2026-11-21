@@ -341,6 +341,24 @@ hook 的处理：
 Environment="FNACL_LOG=1"      # 写到 /tmp/fnacl.log
 ```
 
+### 6.10 回收站（`/dev/trim-trashbin`）—— 部分可用
+
+`trim_acl_shim.ko` 现在除了 `system.trim_acl` xattr，还注册一个 misc 字符
+设备 `/dev/trim-trashbin`（`trimafs` 私有补丁的一部分），让 `trim_trashbind`
+服务能 `open()` 成功，不再因为 `ENOENT` 每 5 秒崩溃重启（历史上重启计数到过 300+）。
+
+**已验证**：模块加载后 `/dev/trim-trashbin` 存在，`trashbind` 能打开它。
+
+**限制**：完整的回收站还需要内核在 rename/unlink 路径上生成
+`trim_trashbin_request_t` 事件（32 字节头 + 路径，`read()` 阻塞等待）。
+`trashbind` 打开设备后执行 `read(6, buf, 262144)` 并解析 `size` 字段
+（`trim_trashbin_request_t`，`process_packet()` 分发搬运动作）。
+当前 shim 的 `read()` 返回 0（EOF），所以 `trashbind` 正常退出而不会常驻。
+要完整支持需要把内核 `trim_do_trashbin` 挂到 VFS 上，属于下一步工作。
+
+因此当前策略是 `systemctl stop trim_trashbind`（避免 `Restart=always`
+造成无效重启循环）；**永久删除、上传、上传目录、改名、远程复制都不受影响**。
+
 ### 6.4 内核需要的内核配置
 
 除第 1 节外，存储栈还需要：
