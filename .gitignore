@@ -23,3 +23,26 @@ fnnas/kmod/modules.order
 # kmod 编译中间文件
 fnnas/kmod/.*.cmd
 fnnas/kmod/..module-common.o.cmd
+
+# ---- 敏感信息与本地构建临时文件（禁止入库）----
+# 提取/逆向用的临时目录（含大量第三方私钥、证书）
+wv/
+wv/**
+# 源码包与内核源码副本
+A3-8.1-kernel-source-master/
+*.tar.gz
+*.tar.xz
+# 密钥/证书文件（任何位置）
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+*.csr
+*.crt
+# 构建输出镜像（vendor/ 里明确允许的除外）
+out/
+images/
+*.img
+!vendor/stock-boot-orig.img
+!vendor/a3-empty.cpio.gz
