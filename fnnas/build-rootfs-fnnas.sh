@@ -239,18 +239,6 @@ ExecStartPost=/bin/sh -c 'for i in 1 2 3 4 5; do [ -S /var/run/mediasrv.socket ]
 MSALIAS
 
 
-# 把这个 setup 挂到已有的 a3-fnnas-fixes.service 里（它在 early boot 跑）
-# 在 fixes 脚本开头增加调用（幂等）
-python3 - "$ROOT/usr/local/sbin/a3-fnnas-fixes" <<'PY2'
-import sys
-p=sys.argv[1]
-s=open(p).read()
-line='/usr/local/sbin/a3-fnperm-hook-setup 2>/dev/null || true'
-if line not in s:
-    marker='# 1. mdadm wrapper'
-    s=s.replace(marker, line+'\\n'+marker, 1)
-    open(p,'w').write(s)
-PY2
 
 say "  hook 库已安装到 /opt/fnnas/hook/"
 
@@ -416,6 +404,20 @@ fi
 exit 0
 FIXES
 chmod 755 "$ROOT/usr/local/sbin/a3-fnnas-fixes"
+
+# 把这个 setup 挂到已有的 a3-fnnas-fixes.service 里（它在 early boot 跑）
+# 在 fixes 脚本开头增加调用（幂等）
+python3 - "$ROOT/usr/local/sbin/a3-fnnas-fixes" <<'PY2'
+import sys
+p=sys.argv[1]
+s=open(p).read()
+line='/usr/local/sbin/a3-fnperm-hook-setup 2>/dev/null || true'
+if line not in s:
+    marker='# 1. mdadm wrapper'
+    s=s.replace(marker, line+'\\n'+marker, 1)
+    open(p,'w').write(s)
+PY2
+
 
 cat > "$ROOT/etc/systemd/system/a3-fnnas-fixes.service" <<'UNIT'
 [Unit]
