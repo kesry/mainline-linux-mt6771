@@ -98,7 +98,9 @@ jobs:
           cd linux-6.12.115
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- a3_defconfig
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j"$(nproc)" Image
-          ls -lh arch/arm64/boot/Image System.map
+          # 为 trim_acl_shim.ko 生成 Module.symvers（Image target 不产出）
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j"$(nproc)" modules
+          ls -lh arch/arm64/boot/Image System.map Module.symvers
 
       - name: 打包 boot.img
         if: github.event_name != 'workflow_dispatch' || inputs.build_boot
@@ -119,6 +121,36 @@ jobs:
           cp -v "$PWD/vendor/boot.img" out/boot.img
           ls -lh out/boot.img
           md5sum out/boot.img
+
+      - name: 编译 trim_acl_shim.ko 并打包安装器
+        run: |
+          set -e
+          # 用刚编译的干净内核树（vermagic=6.12.115，匹配本 boot.img）
+          make -C fnnas/kmod \
+            KDIR="$PWD/linux-6.12.115" \
+            KOUT="$PWD/linux-6.12.115" \
+            ARCH=arm64 CROSS=aarch64-linux-gnu- clean 2>/dev/null || true
+          make -C fnnas/kmod \
+            KDIR="$PWD/linux-6.12.115" \
+            KOUT="$PWD/linux-6.12.115" \
+            ARCH=arm64 CROSS=aarch64-linux-gnu-
+          modinfo fnnas/kmod/trim_acl_shim.ko | grep vermagic
+          mkdir -p release release-pkg/trim-acl-shim
+          cp -v fnnas/kmod/trim_acl_shim.ko release-pkg/trim-acl-shim/
+          cp -v fnnas/kmod/install-trim-acl.sh release-pkg/trim-acl-shim/ 2>/dev/null || \
+            echo "警告: install-trim-acl.sh 未找到"
+          chmod +x release-pkg/trim-acl-shim/install-trim-acl.sh 2>/dev/null || true
+          ( cd release-pkg && zip -qr ../release/trim-acl-shim.zip trim-acl-shim )
+          ls -lh release/trim-acl-shim.zip
+
+      - name: 上传 trim-acl-shim
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trim-acl-shim
+          path: release/trim-acl-shim.zip
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: 构建 rootfs-minimal.img
         if: github.event_name != 'workflow_dispatch' || inputs.build_rootfs_minimal
