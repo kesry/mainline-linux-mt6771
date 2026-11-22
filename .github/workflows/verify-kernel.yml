@@ -175,6 +175,7 @@ jobs:
           chmod +x script/*.sh fnnas/*.sh
           # 素材（trimfs.tgz / trim-media-lib.zip）由脚本从 GitHub source release 自动下载
           WORK="$PWD/wv/fnnas-build" OUT="$PWD/out" \
+          TRIM_ACL_KO="$PWD/fnnas/kmod/trim_acl_shim.ko" \
           A3_USBNET_AUTO_ECM="${{ github.event_name == 'workflow_dispatch' && inputs.auto_ecm && '1' || '0' }}" \
             bash fnnas/build-rootfs-fnnas.sh "" "" 8
           ls -lh out/fnnas-rootfs.img out/fnnas-rootfs.simg

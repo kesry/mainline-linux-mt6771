@@ -226,6 +226,39 @@ os.chmod(KEYFILE, 0o600)
 KEYGEN
 chmod 755 "$ROOT/usr/local/sbin/a3-trim-keygen"
 
+# --- 5.x trim_acl_shim.ko（飞牛私有 system.trim_acl xattr + /dev/trim-trashbin）---
+# 关键：ko 的 vermagic 必须匹配 boot.img 内核。CI 用同一次编译的干净内核树
+# 编出 ko，通过 TRIM_ACL_KO 环境变量传入；本地构建可不传（保持兼容）。
+if [ -n "${TRIM_ACL_KO:-}" ] && [ -f "$TRIM_ACL_KO" ]; then
+    say "  注入 trim_acl_shim.ko ($TRIM_ACL_KO)"
+    mkdir -p "$ROOT/opt/fnnas"
+    install -m 0644 "$TRIM_ACL_KO" "$ROOT/opt/fnnas/trim_acl_shim.ko"
+    mkdir -p "$ROOT/etc/systemd/system/multi-user.target.wants"
+    cat > "$ROOT/etc/systemd/system/a3-trimacl-shim.service" <<'TRIMUNIT'
+[Unit]
+Description=A3 trim_acl_shim + trim.key self-heal (fnOS on mainline kernel)
+After=local-fs.target
+Before=trim_main.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=/usr/local/sbin/a3-trim-keygen
+ExecStart=/sbin/insmod /opt/fnnas/trim_acl_shim.ko mounts=/vol1
+ExecStop=/sbin/rmmod trim_acl_shim
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+TRIMUNIT
+    ln -sf /etc/systemd/system/a3-trimacl-shim.service \
+        "$ROOT/etc/systemd/system/multi-user.target.wants/a3-trimacl-shim.service"
+    say "  a3-trimacl-shim.service 已启用"
+else
+    echo "  提示: 未注入 trim_acl_shim.ko（TRIM_ACL_KO 未设置）；授权功能需另装 ko" >&2
+fi
+
 # --- 5.y mediasrv socket 权限 ---
 # 重要：mediasrv 与 trim-media（影视 app）必须各用各的 socket，不能互相软链：
 #   /var/run/mediasrv.socket  <- 软解 mediasrv（音乐 media.* API + 转码，返回 JSON）
