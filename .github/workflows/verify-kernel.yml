@@ -125,16 +125,14 @@ jobs:
       - name: 编译 trim_acl_shim.ko 并打包安装器
         run: |
           set -e
-          # 用刚编译的干净内核树（vermagic=6.12.115，匹配本 boot.img）
-          make -C fnnas/kmod \
-            KDIR="$PWD/linux-6.12.115" \
-            KOUT="$PWD/linux-6.12.115" \
-            ARCH=arm64 CROSS=aarch64-linux-gnu- clean 2>/dev/null || true
-          make -C fnnas/kmod \
-            KDIR="$PWD/linux-6.12.115" \
-            KOUT="$PWD/linux-6.12.115" \
-            ARCH=arm64 CROSS=aarch64-linux-gnu-
-          modinfo fnnas/kmod/trim_acl_shim.ko | grep vermagic
+          # CI 是 in-tree 构建：源码目录即构建目录，不能传 O= 参数，
+          # 否则内核 Makefile 会把 out/in-tree 混淆、去找工作区根 Makefile 而失败。
+          # 直接调用内核 Makefile 编外部模块（M=fnnas/kmod）。
+          KDIR="$PWD/linux-6.12.115"
+          M="$PWD/fnnas/kmod"
+          make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- M="$M" clean 2>/dev/null || true
+          make -C "$KDIR" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- M="$M" modules
+          modinfo "$M/trim_acl_shim.ko" | grep vermagic
           mkdir -p release release-pkg/trim-acl-shim
           cp -v fnnas/kmod/trim_acl_shim.ko release-pkg/trim-acl-shim/
           cp -v fnnas/kmod/install-trim-acl.sh release-pkg/trim-acl-shim/ 2>/dev/null || \
