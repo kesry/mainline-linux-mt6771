@@ -30,7 +30,7 @@ set -e
 #   https://github.com/kesry/mainline-linux-mt6771/releases/download/source/
 # 参数仍可显式覆盖（本地已有文件时传本地路径即可）。
 SOURCE_BASE="https://github.com/kesry/mainline-linux-mt6771/releases/download/source"
-# TRIMFS_URL="${TRIMFS_URL:-$SOURCE_BASE/trimfs.tgz}"
+TRIMFS_URL="${TRIMFS_URL:-$SOURCE_BASE/trimfs.tgz}"
 # TRIMLIB_URL="${TRIMLIB_URL:-$SOURCE_BASE/trim-media-lib.zip}"
 
 ISO="${1:-}"          # 兼容旧参数：本地 ISO（保留为空则从 URL 下载 trimfs.tgz）
