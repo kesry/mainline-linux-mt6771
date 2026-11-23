@@ -45,9 +45,9 @@ sysinfo_service 崩（can not probe trim dev）
 → Web API 全 502 → 无法登录
 ```
 
-## 2. 为什么需要 LD 拦截 / 软解 mediasrv
+## 2. 为什么需要 LD 拦截 强制软解 mediasrv
 
-飞牛原版 `mediasrv` 依赖 Rockchip MPP 硬件编解码（`librockchip_mpp.so.1`），
+飞牛 `mediasrv` 依赖 Rockchip MPP 硬件编解码（`librockchip_mpp.so.1`），
 启动时会读 `/proc/device-tree/compatible` 匹配 SoC。MT6771 不在支持列表：
 
 ```
@@ -60,7 +60,7 @@ mpp_platform: can not found match soc name: mediatek,mt6771
 （/dev/dri、dma-heap），导致不稳定。用户明确要求走软解。
 
 **采用的方案**：用 [kesry/trimmedia-linux-arm](https://github.com/kesry/trimmedia-linux-arm)
-提供的 Go 软解版 mediasrv + 拦截库：
+提供的拦截库：
 
 ```
 nodri.so      屏蔽 /dev/dri 探测     → 让程序不去找不存在的 GPU 节点
