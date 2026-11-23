@@ -9,7 +9,7 @@
 #   1. 从 trimfs.tgz 解出飞牛 rootfs
 #   2. 注入 LD 拦截库（nodri/nodmaheap，软解媒体服务需要）
 #   3. 注入 USB gadget（RNDIS 网络 + ACM 串口）—— 非 UEFI 设备必须自己建
-#   4. 替换 mediasrv 为软解版（飞牛原版依赖 RK MPP，MT6771 上必崩）
+#   4. 强制 mediasrv 为软解版（飞牛原版依赖 RK MPP，MT6771 上必崩）
 #   5. 注入主线内核兼容补丁（mdadm lockless / mount trimacl / 固定 DNS）
 #   6. 打包成 ext4 镜像（用 loop 挂载 + 限速解压，避免构建机 OOM）
 #
@@ -30,11 +30,11 @@ set -e
 #   https://github.com/kesry/mainline-linux-mt6771/releases/download/source/
 # 参数仍可显式覆盖（本地已有文件时传本地路径即可）。
 SOURCE_BASE="https://github.com/kesry/mainline-linux-mt6771/releases/download/source"
-TRIMFS_URL="${TRIMFS_URL:-$SOURCE_BASE/trimfs.tgz}"
-TRIMLIB_URL="${TRIMLIB_URL:-$SOURCE_BASE/trim-media-lib.zip}"
+# TRIMFS_URL="${TRIMFS_URL:-$SOURCE_BASE/trimfs.tgz}"
+# TRIMLIB_URL="${TRIMLIB_URL:-$SOURCE_BASE/trim-media-lib.zip}"
 
 ISO="${1:-}"          # 兼容旧参数：本地 ISO（保留为空则从 URL 下载 trimfs.tgz）
-TRIMLIB="${2:-}"      # 兼容旧参数：本地 trim-media-lib.zip
+# TRIMLIB="${2:-}"      # 兼容旧参数：本地 trim-media-lib.zip
 IMG_SIZE_G="${3:-8}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORK="${WORK:-/opt/oppoa3/wv/fnnas-build}"
@@ -76,13 +76,14 @@ fi
 gzip -t "$WORK/trimfs.tgz" 2>/dev/null || { echo "trimfs.tgz 校验失败" >&2; exit 1; }
 
 # trim-media-lib.zip（软解媒体服务）：未传本地文件时也从 release 下载
-if [ -z "$TRIMLIB" ] || [ ! -f "$TRIMLIB" ]; then
-    TRIMLIB="$WORK/trim-media-lib.zip"
-    if [ ! -f "$TRIMLIB" ]; then
-        say "  下载 $TRIMLIB_URL"
-        curl -fsSL --retry 3 -o "$TRIMLIB" "$TRIMLIB_URL"
-    fi
-fi
+# mediasrv依赖在飞牛上存在
+# if [ -z "$TRIMLIB" ] || [ ! -f "$TRIMLIB" ]; then
+#     TRIMLIB="$WORK/trim-media-lib.zip"
+#     if [ ! -f "$TRIMLIB" ]; then
+#         say "  下载 $TRIMLIB_URL"
+#         curl -fsSL --retry 3 -o "$TRIMLIB" "$TRIMLIB_URL"
+#     fi
+# fi
 ROOT="$WORK/rootfs"
 if [ ! -f "$ROOT/etc/fstab" ]; then
     rm -rf "$ROOT" && mkdir -p "$ROOT"
@@ -101,8 +102,7 @@ say "=== 2/5 编译 LD_PRELOAD 拦截库 ==="
 mkdir -p "$ROOT/opt/fnnas/hook"
 install -m 0755 "$SCRIPT_DIR/ld-hooks/nodri.so"     "$ROOT/opt/fnnas/hook/"
 install -m 0755 "$SCRIPT_DIR/ld-hooks/nodmaheap.so" "$ROOT/opt/fnnas/hook/"
-# fakecompat 可选，默认也放进去但不注入（见 README）
-install -m 0755 "$SCRIPT_DIR/ld-hooks/fakecompat.so" "$ROOT/opt/fnnas/hook/" 2>/dev/null || true
+install -m 0755 "$SCRIPT_DIR/ld-hooks/fakecompat.so" "$ROOT/opt/fnnas/hook/"
 
 # --- 2.1 飞牛私有 syscall 兼容 hook（伪 dirfd faccessat）---
 # 飞牛 libnperm 用 faccessat(-21586, struct_ptr, R/W_OK, 0) 做权限判定：
@@ -265,11 +265,11 @@ fi
 #   /var/run/trim_media.sock  <- 飞牛影视 app（nginx /v 反向代理，返回 HTML/媒体）
 # 之前把 mediasrv.socket 软链到 trim_media.sock，导致音乐连到影视 app 拿到 HTML，
 # 报 "invalid character '<'" 扫不了码。已改为各自独立。
-mkdir -p "$ROOT/etc/systemd/system/mediasrv.service.d"
-cat > "$ROOT/etc/systemd/system/mediasrv.service.d/a3-socket-alias.conf" <<'MSALIAS'
-[Service]
-ExecStartPost=/bin/sh -c 'for i in 1 2 3 4 5; do [ -S /var/run/mediasrv.socket ] && break; sleep 1; done; chmod 666 /var/run/mediasrv.socket 2>/dev/null || true'
-MSALIAS
+# mkdir -p "$ROOT/etc/systemd/system/mediasrv.service.d"
+# cat > "$ROOT/etc/systemd/system/mediasrv.service.d/a3-socket-alias.conf" <<'MSALIAS'
+# [Service]
+# ExecStartPost=/bin/sh -c 'for i in 1 2 3 4 5; do [ -S /var/run/mediasrv.socket ] && break; sleep 1; done; chmod 666 /var/run/mediasrv.socket 2>/dev/null || true'
+# MSALIAS
 
 
 
@@ -332,29 +332,30 @@ if [ "${A3_USBNET_AUTO_ECM:-0}" = "1" ]; then
 fi
 
 # ------------------------------------------------------------
-# 4. 替换 mediasrv 为软解版
+# 4. 强制 mediasrv 软解
 # ------------------------------------------------------------
-say "=== 4/5 安装软解媒体服务 ==="
-TIMEDIA="$WORK/trimmedia"
-if [ ! -x "$TIMEDIA/bin/mediasrv" ]; then
-    rm -rf "$TIMEDIA" && mkdir -p "$TIMEDIA"
-    7z x -y -o"$TIMEDIA" "$TRIMLIB" >/dev/null
-fi
+say "=== 4/5 强制 mediasrv 软解 ==="
+# TIMEDIA="$WORK/trimmedia"
+# if [ ! -x "$TIMEDIA/bin/mediasrv" ]; then
+#     rm -rf "$TIMEDIA" && mkdir -p "$TIMEDIA"
+#     7z x -y -o"$TIMEDIA" "$TRIMLIB" >/dev/null
+# fi
 mkdir -p "$ROOT/opt/trimmedia"
-cp -a "$TIMEDIA"/. "$ROOT/opt/trimmedia/"
-chmod +x "$ROOT/opt/trimmedia/bin/mediasrv"
+# cp -a "$TIMEDIA"/. "$ROOT/opt/trimmedia/"
+# chmod +x "$ROOT/opt/trimmedia/bin/mediasrv"
 
-# systemd drop-in：不改动原版二进制，可回退（删掉 override.conf 即可）
+# 
 mkdir -p "$ROOT/etc/systemd/system/mediasrv.service.d"
 cat > "$ROOT/etc/systemd/system/mediasrv.service.d/override.conf" <<'UNIT'
 [Service]
-ExecStart=
-ExecStart=/opt/trimmedia/bin/mediasrv -o /usr/trim/logs/mediasrv.log -a /var/run/mediasrv.socket
-Environment=LD_LIBRARY_PATH=/opt/trimmedia/lib/mediasrv/lib:/opt/trimmedia/lib:/usr/trim/lib/mediasrv/lib:/usr/lib/aarch64-linux-gnu
+Type=simple
+ExecStart=/usr/trim/bin/mediasrv -o /usr/trim/logs/mediasrv.log -a /var/run/mediasrv.socket
+Environment=LD_LIBRARY_PATH=/usr/trim/lib/mediasrv/lib:/usr/trim/lib
+Restart=always
+RestartSec=5
 Environment=LD_PRELOAD=/opt/fnnas/hook/nodri.so:/opt/fnnas/hook/nodmaheap.so:/opt/fnnas/hook/fakecompat.so
-Environment=PATH=/opt/trimmedia/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 UNIT
-say "  软解 mediasrv 已安装（LD_PRELOAD 三件套 hook 已写进启动 unit），socket ACL drop-in 已配置"
+say "  强制 mediasrv 软件依赖已安装（LD_PRELOAD 三件套 hook 已写进启动 unit），socket ACL drop-in 已配置"
 
 # ------------------------------------------------------------
 # 5. 注入主线内核兼容补丁（绕开飞牛私有内核特性）
