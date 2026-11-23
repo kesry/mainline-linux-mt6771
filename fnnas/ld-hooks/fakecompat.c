@@ -10,7 +10,7 @@
 
 #define TARGET "/proc/device-tree/compatible"
 /* 真实 DTB 里 compatible 是 "vendor,board\0soc\0" 这种 NUL 分隔序列 */
-static const char FAKE[] = "mediatek,MT6833\0";
+static const char FAKE[] = "mediatek,MT6771\0";
 
 /* 把一个内存 buffer 落成一个只读临时文件，返回路径 */
 static const char *fake_path(void) {
