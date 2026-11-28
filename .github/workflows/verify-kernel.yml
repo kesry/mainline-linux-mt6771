@@ -97,6 +97,15 @@ jobs:
           set -e
           cd linux-6.12.115
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- a3_defconfig
+          # fnOS 资源管理(resmon)的 proc.list 读 /proc/<pid>/io，
+          # a3_defconfig 默认关闭 TASKSTATS 导致该文件不存在 → errno 4096。
+          # 用内核自带 scripts/config 打开 per-task I/O 统计依赖链。
+          scripts/config --enable TASKSTATS
+          scripts/config --enable TASK_DELAY_ACCT
+          scripts/config --enable TASK_XACCT
+          scripts/config --enable TASK_IO_ACCOUNTING
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+          grep -E 'CONFIG_TASK(STATS|XACCT|DELAY_ACCT|IO_ACCOUNTING)' .config
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j"$(nproc)" Image
           # 为 trim_acl_shim.ko 生成 Module.symvers（Image target 不产出）
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j"$(nproc)" modules
